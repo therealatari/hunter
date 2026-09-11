@@ -44,4 +44,53 @@ RSpec.describe 'the rally hub bind address' do
       Socket.tcp(lan.ip_address, port, connect_timeout: 2, &:close)
     end.to raise_error(SystemCallError)
   end
+
+  # A restart in the same Lich starts a second service. DRb replaces the
+  # primary without closing the first, so the previous run's Hub keeps
+  # answering hunt_id, register and report from a roster that is gone,
+  # and a follower holding the old uri talks to a dead hunt. The teardown
+  # in before_dying is what closes it.
+  it 'leaves the previous hub serving when a second service starts' do
+    DRb.start_service(loopback_uri, hub)
+    first = DRb.uri
+    DRb.start_service(loopback_uri, Class.new { def ping = :second }.new)
+    expect(DRb.uri).not_to eq(first)
+    expect(DRbObject.new_with_uri(first).ping).to eq(:pong)
+  end
+
+  # Lich kills the script's thread group - the DRb acceptor among them -
+  # before it runs any at_exit proc, so the socket is still bound when
+  # before_dying starts. stop_service closes it from there anyway, which
+  # is why the teardown can live on the kill path without blocking.
+  it 'closes the socket from a cleanup thread after the acceptor is killed' do
+    group = ThreadGroup.new
+    holder = Thread.new do
+      group.add(Thread.current)
+      DRb.start_service(loopback_uri, hub)
+      sleep 5
+    end
+    sleep 0.5
+    uri = DRb.uri
+    group.list.each(&:kill)
+    holder.join
+    expect(DRbObject.new_with_uri(uri).ping).to eq(:pong) # the kill alone does not close it
+    DRb.stop_service
+    expect { DRbObject.new_with_uri(uri).ping }.to raise_error(DRb::DRbConnError)
+  end
+
+  # The teardown itself, which the socket tests above cannot reach: both
+  # roles start a service and both must stop it.
+  describe 'the script teardown' do
+    let(:source) { File.read(File.expand_path('../../scripts/eohunter.lic', __dir__)) }
+
+    it 'stops the leader service on the kill path' do
+      teardown = source[/leader&\.finish!.*?fput\('movement autosneak off'/m]
+      expect(teardown).to include('DRb.stop_service if leader')
+    end
+
+    it 'stops the follower service on the kill path' do
+      teardown = source[/member\.stop_pulse!\r?\n.*?Watch\.uninstall!/m]
+      expect(teardown).to include('DRb.stop_service')
+    end
+  end
 end

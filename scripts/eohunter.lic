@@ -657,6 +657,8 @@ if mode == 'tail'
   before_dying do
     engine.stop!(:script_killed)
     member.stop_pulse!
+    # the follower's own service, started at the join above
+    DRb.stop_service
     EO::Engine::Watch.uninstall!
     EO::Engine::Events.reset!
   end
@@ -751,6 +753,11 @@ before_dying do
   # line until the next eohunter start evicted them by name.
   begin
     leader&.finish!(engine.stop_reason || :script_killed)
+    # The listening socket outlives the script: DRb.start_service replaces
+    # the primary without closing the old server, so a restart in the same
+    # Lich leaves the previous run's Hub still answering hunt_id, register
+    # and report from a dead roster. stop_service closes the current one.
+    DRb.stop_service if leader
     fput('movement autosneak off') if profile['sneaky_sneaky'] # bigshot 3374
   ensure
     EO::Engine::Watch.uninstall!

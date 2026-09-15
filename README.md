@@ -51,7 +51,7 @@ refreshes the leader's room, travels back, and rejoins automatically.
 `group_fried_trigger` defaults to `any`, so any live member reaching
 their own configured `fried` threshold brings the group home. Set it to
 `all` to wait for every live member, or give one or more names such as
-`Skooshii` or `Skooshii, Calvix`. Named matching is case-insensitive.
+`Testfollower` or `Testfollower, Testleader`. Named matching is case-insensitive.
 Non-mind rest reasons still return immediately regardless of this setting.
 
 The `deader` setting stops for dead players during the hunting phase. Unrelated
@@ -216,6 +216,7 @@ line reference.
 - [Getting started](docs/guides/getting-started.md): install, the dry run, the modes, how it stops
 - [Profiles](docs/guides/profiles.md): every bigshot profile key the engine honours, its type, default and reader
 - [Combat buff policy](docs/guides/combat-buffs.md): opt-in native restoration, safe recovery, and verified departure requirements
+- [Multi-account group startup](docs/guides/multi-account-group.md): opt-in followers, one-command party startup, local supervision, and safe return
 - [The routine language](docs/guides/routines.md): the words, the spell syntax, the maneuvers, every modifier
 - [Architecture](docs/guides/architecture.md): the pieces, the tick, actions, World, events, travel, groups, the watchdogs
 - [Extending the engine](docs/guides/extending.md): adding an action, a routine word, a behavior, a World reader

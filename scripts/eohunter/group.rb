@@ -1655,8 +1655,16 @@ module EO::Engine
       # @return [Actions::Result]
       def perform
         answer = group_join(@leader)
-        return Result.new(status: :success, reason: :joined) if answer.key?(:ok)
-        return Result.new(status: :success, reason: :already_member) if answer.key?(:noop)
+        if answer.key?(:ok) || answer.key?(:noop)
+          # "You join" identifies the leader, not every existing member.
+          # Refresh through Lich on this owner action thread before the next
+          # engine tick validates the physical party. An unanswered GROUP is
+          # unknown, not a confirmed roster or a successful rejoin.
+          ::Lich::Gemstone::Group.check
+          return Result.new(status: :timeout, reason: :group_unconfirmed) unless ::Lich::Gemstone::Group.checked?
+
+          return Result.new(status: :success, reason: answer.key?(:ok) ? :joined : :already_member)
+        end
         return Result.new(status: :failed, reason: :not_here) if answer[:err].nil?
 
         Result.new(status: :failed, reason: :closed)
@@ -2137,6 +2145,8 @@ module EO::Engine
 
       private
 
+      def grouped_for_routines? = true
+
       def leader_here?(world)
         leader = @member.leader_name.to_s
         Array(world.room.players).any? { |p| p.noun.to_s == leader }
@@ -2168,6 +2178,7 @@ module EO::Engine
       def initialize(member:, travel: nil, clock: Time)
         super()
         @member = member
+        @native_cut = Group::NativeCut.new(reader: member.native_reader) if member.native_reader
         @travel = travel || EO::Engine::Travel.default
         @clock = clock
         @trip = nil
@@ -2227,6 +2238,12 @@ module EO::Engine
       # @param world [World]
       # @return [Actions::Result, nil] nil mid-trip or when already following
       def tick(world)
+        # A missing leader in an unfinished parser dispatch is not a split
+        # party. Reuse the same publication fence as movement preparation;
+        # legacy followers without a native reader retain their old behavior.
+        if @native_cut && !@native_cut.capture(world) { true }
+          return Actions::Result.new(status: :skipped, reason: :state_unconfirmed)
+        end
         if world.me.in_rt? || world.me.in_cast_rt?
           return Actions::Result.new(status: :skipped, reason: :roundtime)
         end
@@ -2241,7 +2258,9 @@ module EO::Engine
             return Actions::Result.new(status: :failed, reason: :no_leader_room) if room.nil?
             return Actions::Result.new(status: :success, reason: :leader_room) if room == current_room
 
-            case EO::Engine::Travel.step(self, @travel, room, world)
+            case EO::Engine::Travel.step(self, @travel, room, world) {
+              follow_launch_allowed?(world)
+            }
             when :underway then return nil
             when :arrived then return Actions::Result.new(status: :success, reason: :arrived)
             else return Actions::Result.new(status: :failed, reason: :could_not_reach)
@@ -2263,6 +2282,11 @@ module EO::Engine
       end
 
       private
+
+      def follow_launch_allowed?(world)
+        ready = -> { !leader_here?(world) && !world.me.in_rt? && !world.me.in_cast_rt? }
+        @native_cut ? @native_cut.capture(world, &ready) : ready.call
+      end
 
       def leader_here?(world)
         leader = @member.leader_name.to_s

@@ -1,0 +1,11 @@
+=begin
+  eohunter-ma-group: optional persistent multi-account hunting receiver.
+  author: elanthia-online
+  game: Gemstone
+  tags: hunting, utility
+  required: Lich >= 5.21.0
+  version: 0.1.0
+=end
+
+Script.loadlib('libeohuntergroup')
+::EO::HunterGroup.run_receiver(Script.current.vars[1..])

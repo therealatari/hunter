@@ -47,6 +47,27 @@ module EO
         when 'save'
           @store.save(request.fetch('kind'), request.fetch('name'), request.fetch('data'),
                       expected_revision: request['revision'])
+        when 'profile_visibility'
+          source = request.fetch('source', 'native')
+          raise ArgumentError, 'unknown source' unless %w[native legacy].include?(source)
+
+          @store.set_profile_visibility(request.fetch('name'), source: source.to_sym,
+                                        hidden: request.fetch('hidden'), expected_revision: request['revision'])
+        when 'set_active_profile'
+          raise ArgumentError, 'active profiles must be EOHunter-owned' unless request.fetch('source', 'native') == 'native'
+
+          @store.set_active_profile(request.fetch('name'), expected_revision: request['revision'])
+        when 'set_character_injury_policy'
+          @store.set_character_injury_policy(request.fetch('name'), expected_revision: request['revision'])
+        when 'delete_preview', 'delete_document'
+          raise ArgumentError, 'legacy inputs remain read-only' unless request.fetch('source', 'native') == 'native'
+
+          kind = request.fetch('kind', 'profiles')
+          return @store.delete_preview(kind, request.fetch('name')) if request['action'] == 'delete_preview'
+
+          raise ArgumentError, 'explicit delete confirmation is required' unless request['confirm'] == true
+
+          @store.delete_document(kind, request.fetch('name'), expected_revision: request.fetch('revision'))
         when 'validate' then validate(request.fetch('data'), request.fetch('mode', 'solo'), request['area'], request.fetch('kind', 'profiles'))
         when 'creature_sequence'
           Composition.new(store: @store).assign_creature_sequence(request.fetch('data'), creature: request.fetch('creature'), commands: request.fetch('commands'))
@@ -77,7 +98,9 @@ module EO
         {
           context: @context, fields: @schema.fields,
           profiles: @store.list('profiles'), defaults: @store.list('defaults'), plans: @store.list('plans'),
+          injury_policies: @store.list('injury_policies'), character_preferences: @store.character_preferences,
           legacy_profiles: legacy_profiles,
+          profile_visibility: @store.profile_visibility,
           recovery_fallback: @recovery_fallback,
           capabilities: @schema.capabilities,
           routine_maneuvers: @schema.routine_maneuvers,
@@ -95,9 +118,14 @@ module EO
 
       def validate(data, mode, area, kind)
         raise ArgumentError, 'unknown hunting mode' unless %w[solo head tail].include?(mode)
-        raise ArgumentError, 'unknown validation kind' unless %w[profiles defaults].include?(kind)
+        raise ArgumentError, 'unknown validation kind' unless %w[profiles defaults injury_policies].include?(kind)
 
-        result = Composition.new(store: @store).resolve(data)
+        if kind == 'injury_policies'
+          expression = @store.validate_injury_policy!(data)
+          return { errors: [], warnings: ['Custom Ruby is preserved, not executed or verified by setup.'], effective: { 'wounded_eval' => expression }, provenance: { 'wounded_eval' => 'injury policy' } }
+        end
+
+        result = Composition.new(store: @store).resolve(data, character_policy: kind == 'profiles')
         return { errors: result.errors, warnings: [], effective: {}, provenance: result.provenance } unless result.valid?
 
         checked = if kind == 'defaults'

@@ -11,6 +11,39 @@ Development preview, 2026-09-16. Branch: `feat/web-setup`.
 Baseline: `Nisugi/hunter` main at
 `c964f0995bb05739fe122f1e0699316b7ced9219`.
 
+## Latest feedback snapshot: dashboard and shared policies
+
+The following supersedes the older verification counts and deployment notes
+below; those entries remain a history of the prototype's iterations.
+
+- Manage profiles is the landing page, with compact active-hunt and injury-default
+  cards, responsive hunt/shared-document columns, and the active hunt loaded for
+  settings-tab navigation. Selecting a default does not start a hunt.
+- Native profiles can be selected as the argument-free launch default, hidden,
+  restored or deleted with revision checks and recoverable backups. Legacy
+  Bigshot originals remain read-only. Referenced shared documents and selected
+  defaults cannot be deleted until their saved links are removed.
+- Injury policies can be named and shared across a character's hunts, with a
+  character default and explicit per-hunt overrides. Existing custom expressions
+  remain overrides until the player deliberately replaces them. Policy selection
+  resolves into the existing `wounded_eval`; running hunts retain captured settings.
+- Combat Plan and Injury policy editors scope their sidebar and search to that
+  document. They no longer render their editor under unrelated hunt-page headings.
+- Rest & services, like Hunting behavior, groups related controls rather than
+  displaying an undifferentiated settings wall.
+
+Verification on the current source: **1,445 Ruby examples, zero failures, one
+Windows-only pending example** with local native integration fixtures enabled;
+**52/52 real-backend offline browser checks**, including dashboard sizing,
+mobile overflow, startup selection, shared-policy resolution and navigation.
+Screenshots use synthetic fixture data. Packaging/syntax checks passed and
+the local user-feedback setup build was installed after backup. No character
+profiles or game state were changed by that installation.
+
+Local checks use installed Ruby 4.0.5 tooling; a clean locked-dependency install,
+native Windows/macOS browser lifecycle, and live area verification remain gaps.
+This remains a draft for interface feedback, not a merge-readiness claim.
+
 This is the first integrated implementation of the revision-2 setup proposal,
 not a claim that every proposed workflow is complete. No production profiles
 were changed and no game commands were sent during implementation. An initial

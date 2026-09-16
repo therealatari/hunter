@@ -61,8 +61,36 @@ Looting, and When to leave a room. These sections are open by default; their
 short descriptions distinguish room fleeing from returning to rest.
 The custom flee-message pattern and obsolete box-in-hand
 compatibility flag stay under Advanced settings even though they have help text.
-Shared defaults and plans can be created from **Reusable settings & current
-draft** on the profiles page. Plans open their command editor, not JSON.
+**Manage profiles** has direct Add/Edit controls for character defaults,
+Combat Plans, and Injury policies. Plans open their command editor, not JSON.
+Native documents can be deleted after confirmation, with exact-byte recovery
+copies kept in `eohunter/.deleted/<kind>/`. Referenced shared documents and
+the selected active profile cannot be deleted until their saved links are
+removed. Hide/Show only changes the hunt list, not launch eligibility; legacy
+Bigshot profiles can be hidden but never deleted or overwritten here.
+
+When editing a standalone Combat Plan or Injury policy, the sidebar and search
+show only settings belonging to that shared document. **Choose a hunt profile**
+returns to Manage profiles without discarding the current draft; save the shared
+document before opening a hunt to configure its areas, buffs or rest settings.
+Switching back to a hunt restores the full sidebar. Shared sequence/policy
+editors are never shown beneath unrelated hunt-section headings.
+
+**Set active** selects the native hunt used by an argument-free `;eohunter`.
+Setup always lands on **Manage profiles**, with compact side-by-side active-hunt
+and injury-default summaries on desktop (stacked on mobile). Hunts and reusable
+configuration lists use separate dashboard columns on wider screens.
+The active profile's settings load behind this page and are marked **Active
+profile**; selecting a settings tab edits that hunt. **Edit active hunt** opens
+it directly. Merely opening the dashboard never switches the active selection.
+Explicit profile arguments still select that profile. A missing/broken active
+file fails visibly rather than falling back to a same-name Bigshot profile.
+This selection never starts, stops or changes a running hunt.
+
+Rest & services is grouped into Rest locations, Ready to hunt again, Town rest
+services, Before leaving for a hunt, and Field rest services. Its injury-policy
+link leads to Monitoring & limits: injury rules decide **when** to return,
+whereas rest settings decide **where** to recover and **what** to do there.
 
 Hunter interprets an empty target list as all eligible creatures. The editor
 shows this explicitly and asks for a creature selection or acknowledgment;
@@ -426,10 +454,28 @@ no membership. Original/custom entries and entries from other societies are
 preserved when selecting checkboxes. Mana recovery, blessings and monitored
 missing-spell policies remain separate controls; selection never enables them.
 
-### Injury return rules without writing Ruby
+### Reusable injury policies without writing Ruby
 
-In guided **Rest & recovery** or advanced **Monitoring & limits**, choose a
-starting preset under **When am I too injured to continue?**:
+Under **Manage profiles → Injury policies → Add injury policy**, give your rule
+a name, choose a preset, adjust it, Apply, then Review & save. Select **Use as
+character default** on its saved row to use it across this character's hunts.
+This is independent of the active *hunt profile*. No setting is changed in
+another character's files.
+
+Guided **Rest & recovery** and advanced **Monitoring & limits** show **Injury
+policy for this hunt**. Leave it on **Use character default**, or select a
+different named policy for an area that needs special treatment. The panel
+shows the selected policy and its source, with links to edit it or copy its
+rule into a new policy. Editing a shared policy affects users of that policy
+on their **next launch**, not a hunt already running.
+
+Existing `wounded_eval` rules (including ones inherited from older character
+defaults, deliberately empty rules, and legacy Bigshot rules) are preserved as
+custom overrides. They do **not** silently adopt the new default. Explicitly
+choose **Use character default** to opt them in; save the hunt to retain that
+choice. Opening a legacy profile still saves only an EOHunter-owned copy.
+
+The policy editor offers these starting presets:
 
 - General hunting: health at or below 70%, or any rank 2+ wound.
 - Cautious: health at or below 85%, any wound, or bleeding.
@@ -442,7 +488,8 @@ requests an injury return. Blank health or **Do not check** disables that
 individual condition; at least one condition must remain. These defaults are
 starting points, not a promise of safety for a particular character or area.
 
-**Apply injury return rule** deliberately replaces `wounded_eval` in the draft;
+**Apply injury return rule** deliberately replaces `wounded_eval` in the policy draft
+(or an existing custom hunt/defaults draft);
 Save is separate. Merely opening the panel or choosing a preset changes
 nothing. Existing custom Ruby remains untouched until Apply, and remains
 available under **Original Ruby injury rule (advanced)**. The editor only
@@ -458,6 +505,27 @@ spell knowledge or roundtime. Native injury refreshes may issue `_injury`
 during the running hunt; setup never calls those predicates. Missing native
 predicates are disabled in the editor. No new injury arithmetic or recovery
 engine is introduced, and field/town recovery routing stays with Hunter.
+
+Native policy files live at `data/<game>/<character>/eohunter/injury_policies/<name>.yaml`:
+
+```yaml
+schema_version: 1
+settings:
+  wounded_eval: 'Char.percent_health <= 70'
+```
+
+The selected default is stored separately in
+`eohunter/.character/profiles/preferences.yaml`. A versioned hunt may use
+`injury_policy: Name` for a named override or `injury_policy: null` to explicitly
+use the character default instead of old local/inherited `wounded_eval`.
+With no explicit selection, existing injury expressions take precedence;
+otherwise the character policy is used. With neither, existing engine defaults
+are unchanged. Setup does not invent a safe threshold or heal the character.
+Clearing the default warns that inheriting hunts will no longer receive it.
+Missing or malformed selected policies fail resolution; they do not silently
+remove injury protection. Default selection uses revision checks, and deletion
+refuses policies still selected as default or explicitly referenced by saved
+native documents. Clearing a default or editing a policy never rewrites hunt files.
 
 Live area verification and native Windows/macOS acceptance remain separate
 gates. Do not infer them from Linux fixtures. Any future in-game trial starts

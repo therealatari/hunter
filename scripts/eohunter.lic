@@ -832,6 +832,15 @@ end
 
 name = script.vars[1].to_s
 options = script.vars[2..].to_a.map(&:to_s)
+active_profile_requested = name.empty? && options.empty?
+if active_profile_requested
+  begin
+    name = EO::HunterSetup::Composition.active_profile_name(data_dir: DATA_DIR, game: XMLData.game, character: Char.name).to_s
+  rescue EO::HunterSetup::Store::Error => error
+    EOHunter.msg('error', "active profile unavailable: #{error.message}; select another in ;eohunter setup")
+    exit
+  end
+end
 managed = nil
 if options.last == 'managed'
   Script.loadlib('libeohuntergroup') unless defined?(::EO::HunterGroup::Supervisor)
@@ -844,6 +853,7 @@ controlled, options = EO::Engine::Controller::Launch.extract!(options)
 trial, options = EO::Engine::Controller::TrialSequence.extract!(options)
 dry = options.any? { |o| o =~ /^dry$/i }
 if name.empty?
+  EOHunter.msg('info', 'No active profile selected. Choose one in ;eohunter setup, or supply its name.')
   EOHunter.msg('error', 'usage: ;eohunter <profile> [dry] [bandits] [track <creature>] [head <count> [lan]|tail [uri]]  or  ;eohunter bounty [<creature>] [head <count>|tail]')
   exit
 end
@@ -869,7 +879,7 @@ bounty_task = world.bounty_task
 # its targets and rooms already rewritten for the task (ebounty
 # go_hunting 2264-2279) and its bounty_eval (set_eval 2078); "bounty
 # <creature>" is ebounty's ranger_track.
-bounty_mode = name =~ /\Abounty\z/i ? true : false
+bounty_mode = !active_profile_requested && name.match?(/\Abounty\z/i)
 if bounty_mode
   op = UserVars.op.to_h
   if op.empty?
@@ -893,7 +903,7 @@ if bounty_mode
   # mind guard) and the bandit-present hold below.
   $bigshot_bandits = EO::Engine::Tracking.bandit_task?(bounty_task) ? true : false
 else
-  path = EOHunter.profile_path(name)
+  path = active_profile_requested ? File.join(DATA_DIR, XMLData.game, Char.name, 'eohunter', 'profiles', "#{name}.yaml") : EOHunter.profile_path(name)
   unless managed&.profile_settings || File.exist?(path)
     EOHunter.msg('error', "no profile at #{path}")
     exit

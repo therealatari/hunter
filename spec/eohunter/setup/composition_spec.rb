@@ -14,6 +14,21 @@ RSpec.describe EO::HunterSetup::Composition do
   let(:store) { EO::HunterSetup::Store.new(root: @directory) }
   let(:composition) { described_class.new(store: store) }
 
+  it 'reads a character-scoped active native profile without fallback to a legacy namesake' do
+    path = File.join(@directory, 'GSIV', 'Example', 'eohunter')
+    active_store = EO::HunterSetup::Store.new(root: path)
+    args = { data_dir: @directory, game: 'GSIV', character: 'Example' }
+    expect(described_class.active_profile_name(**args)).to be_nil
+    active_store.save(:profiles, 'active', {}, expected_revision: nil)
+    active_store.set_active_profile('active', expected_revision: nil)
+    expect(described_class.active_profile_name(**args)).to eq('active')
+    expect(described_class.active_profile_name(**args.merge(character: 'Other'))).to be_nil
+    FileUtils.mkdir_p(File.join(@directory, 'GSIV', 'Example', 'bigshot_profiles'))
+    File.write(File.join(@directory, 'GSIV', 'Example', 'bigshot_profiles', 'active.yaml'), 'hunting_commands: attack')
+    File.unlink(File.join(path, 'profiles', 'active.yaml'))
+    expect { described_class.active_profile_name(**args) }.to raise_error(EO::HunterSetup::Store::NotFound)
+  end
+
   def document(settings = {}, **links)
     { 'schema_version' => 1, 'settings' => settings }.merge(links.transform_keys(&:to_s))
   end
@@ -24,6 +39,89 @@ RSpec.describe EO::HunterSetup::Composition do
 
   def plan(name, commands)
     save(:plans, name, { 'commands' => commands })
+  end
+
+  describe 'shared injury policies' do
+    before do
+      save(:injury_policies, 'Usual', document({ 'wounded_eval' => 'Char.percent_health <= 70' }))
+      save(:injury_policies, 'Parasite', document({ 'wounded_eval' => 'Char.percent_health <= 50' }))
+      store.set_character_injury_policy('Usual', expected_revision: nil)
+    end
+
+    it 'inherits across hunts, captures provenance, and permits an explicit area override' do
+      inherited = composition.resolve(document({ 'targets' => 'rat' }))
+      expect(inherited.raw['wounded_eval']).to eq('Char.percent_health <= 70')
+      expect(inherited.provenance['wounded_eval']).to eq('character injury policy/Usual')
+      expect(inherited.revisions.keys).to contain_exactly('character/injury_policy', 'injury_policies/Usual')
+      expect(composition.resolve(document({}, injury_policy: 'Parasite')).raw['wounded_eval']).to eq('Char.percent_health <= 50')
+      expect(composition.resolve(document({}, injury_policy: 'Parasite')).provenance['wounded_eval']).to eq('injury_policies/Parasite')
+      expect(store.character_preferences[:injury_policy]).to eq('Usual')
+    end
+
+    it 'preserves old local and inherited custom rules, including explicit empty values' do
+      ['custom_rule?', '', nil].each do |rule|
+        expect(composition.resolve(document({ 'wounded_eval' => rule })).raw['wounded_eval']).to eq(rule)
+        expect(composition.resolve({ 'wounded_eval' => rule }).raw['wounded_eval']).to eq(rule)
+      end
+      save(:defaults, 'old', document({ 'wounded_eval' => 'old_defaults_rule?' }))
+      expect(composition.resolve(document({}, defaults: 'old')).raw['wounded_eval']).to eq('old_defaults_rule?')
+      opted_in = composition.resolve(document({ 'wounded_eval' => 'custom_rule?' }, defaults: 'old', injury_policy: nil))
+      expect(opted_in.raw['wounded_eval']).to eq('Char.percent_health <= 70')
+      expect(opted_in.warnings.join).to include('replaces')
+    end
+
+    it 'never injects the active policy into a reusable defaults document' do
+      expect(composition.resolve(document({}), character_policy: false).raw).to eq({})
+    end
+
+    it 'holds a captured policy unchanged until the next resolution' do
+      previous = composition.resolve(document({}))
+      saved = store.read(:injury_policies, 'Usual')
+      store.save(:injury_policies, 'Usual', document({ 'wounded_eval' => 'new_rule?' }), expected_revision: saved[:revision])
+      expect(previous.raw['wounded_eval']).to eq('Char.percent_health <= 70')
+      expect(composition.resolve(document({})).raw['wounded_eval']).to eq('new_rule?')
+      store.set_character_injury_policy('Parasite', expected_revision: store.character_preferences[:revision])
+      expect(composition.resolve(document({})).raw['wounded_eval']).to eq('Char.percent_health <= 50')
+      expect(composition.resolve(document({}, injury_policy: 'Usual')).raw['wounded_eval']).to eq('new_rule?')
+    end
+
+    it 'rejects missing, malformed and non-name references instead of weakening a selected policy' do
+      ['missing', '../Usual', false, {}].each do |name|
+        expect(composition.resolve(document({}, injury_policy: name))).not_to be_valid
+      end
+      File.write(File.join(@directory, 'injury_policies', 'Usual.yaml'), "schema_version: 1\nsettings: {}\n")
+      expect(composition.resolve(document({}))).not_to be_valid
+      File.unlink(File.join(@directory, 'injury_policies', 'Usual.yaml'))
+      expect(composition.resolve(document({}))).not_to be_valid
+      expect(composition.resolve(document({}, injury_policy: 'Parasite'))).to be_valid
+    end
+
+    it 'warns when explicit character inheritance has no selected policy' do
+      store.set_character_injury_policy(nil, expected_revision: store.character_preferences[:revision])
+      result = composition.resolve(document({ 'wounded_eval' => 'old_rule?' }, injury_policy: nil))
+      expect(result.raw).not_to have_key('wounded_eval')
+      expect(result.warnings.join).to include('No character injury policy')
+    end
+  end
+
+  it 'resolves native and legacy file launches against the owning character only, without writing legacy files' do
+    root = File.join(@directory, 'GSIV', 'Example')
+    scoped = EO::HunterSetup::Store.new(root: File.join(root, 'eohunter'))
+    scoped.save(:injury_policies, 'Usual', document({ 'wounded_eval' => 'health_rule?' }), expected_revision: nil)
+    scoped.set_character_injury_policy('Usual', expected_revision: nil)
+    scoped.save(:profiles, 'native', document({}), expected_revision: nil)
+    native = File.join(root, 'eohunter', 'profiles', 'native.yaml')
+    expect(described_class.read_profile(native)['wounded_eval']).to eq('health_rule?')
+    legacy = File.join(root, 'bigshot_profiles', 'old.yaml')
+    FileUtils.mkdir_p(File.dirname(legacy))
+    bytes = YAML.dump({ hunting_commands: 'attack', extension: { 101 => 'test' } })
+    File.write(legacy, bytes)
+    expect(described_class.read_profile(legacy)).to include('hunting_commands' => 'attack', 'wounded_eval' => 'health_rule?', 'extension' => { 101 => 'test' })
+    expect(File.binread(legacy)).to eq(bytes)
+    other = File.join(@directory, 'GSIV', 'Other', 'bigshot_profiles', 'old.yaml')
+    FileUtils.mkdir_p(File.dirname(other))
+    File.write(other, bytes)
+    expect(described_class.read_profile(other)).not_to have_key('wounded_eval')
   end
 
   it 'leaves a standalone legacy raw profile and all custom routine slots intact' do

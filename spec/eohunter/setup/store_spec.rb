@@ -21,6 +21,76 @@ RSpec.describe EO::HunterSetup::Store do
     File.write(File.join(legacy, "#{name}.yaml"), contents)
   end
 
+  it 'persists hide/show separately for native and read-only legacy names without changing profiles' do
+    saved = store.save(:profiles, 'same', { 'custom' => false }, expected_revision: nil)
+    write_legacy('same', "broken: [\n")
+    legacy_bytes = File.binread(File.join(legacy, 'same.yaml'))
+    first = store.set_profile_visibility('same', source: :legacy, hidden: true, expected_revision: nil)
+    expect(first[:hidden]).to eq('native' => [], 'legacy' => ['same'])
+    second = store.set_profile_visibility('same', source: :native, hidden: true, expected_revision: first[:revision])
+    expect(store.read(:profiles, 'same')).to eq(saved)
+    expect(File.binread(File.join(legacy, 'same.yaml'))).to eq(legacy_bytes)
+    expect(described_class.new(root: root).profile_visibility).to eq(second)
+    expect { store.set_profile_visibility('same', source: :native, hidden: false, expected_revision: first[:revision]) }.to raise_error(described_class::Conflict)
+    shown = store.set_profile_visibility('same', source: :native, hidden: false, expected_revision: second[:revision])
+    expect(shown[:hidden]['native']).to eq([])
+    expect(Dir.children(legacy)).to eq(['same.yaml'])
+  end
+
+  it 'protects the active native profile from hiding and deletion until explicitly cleared' do
+    saved = store.save(:profiles, 'active', {}, expected_revision: nil)
+    active = store.set_active_profile('active', expected_revision: nil)
+    expect(active[:active_profile]).to eq('active')
+    expect { store.set_profile_visibility('active', source: :native, hidden: true, expected_revision: active[:revision]) }.to raise_error(described_class::Conflict, /active/)
+    expect { store.delete_profile('active', expected_revision: saved[:revision]) }.to raise_error(described_class::Conflict, /active/)
+    expect { store.set_active_profile('missing', expected_revision: active[:revision]) }.to raise_error(described_class::NotFound)
+    expect { store.set_active_profile('bounty', expected_revision: active[:revision]) }.to raise_error(described_class::InvalidName)
+    cleared = store.set_active_profile(nil, expected_revision: active[:revision])
+    expect(cleared[:active_profile]).to be_nil
+    expect(store.delete_profile('active', expected_revision: saved[:revision])[:deleted]).to be(true)
+  end
+
+  it 'requires the exact revision, archives original bytes, and never deletes a legacy namesake' do
+    saved = store.save(:profiles, 'same', { 'custom' => false }, expected_revision: nil)
+    bytes = File.binread(File.join(root, 'profiles', 'same.yaml'))
+    write_legacy('same', "hunting_commands: attack\n")
+    expect(store.profile_delete_preview('same')).to include(revision: saved[:revision], legacy_fallback: true)
+    expect { store.delete_profile('same', expected_revision: nil) }.to raise_error(described_class::Conflict)
+    expect { store.delete_profile('same', expected_revision: 'stale') }.to raise_error(described_class::Conflict)
+    receipt = store.delete_profile('same', expected_revision: saved[:revision])
+    expect(File.binread(File.join(root, receipt[:backup]))).to eq(bytes)
+    expect(store.list(:profiles)).to eq([])
+    expect(store.list(:profiles, source: :legacy)).to eq(['same'])
+    expect { store.delete_profile('../same', expected_revision: saved[:revision]) }.to raise_error(described_class::InvalidName)
+  end
+
+  it 'keeps the source if Windows denies the deletion rename' do
+    saved = store.save(:profiles, 'keep', {}, expected_revision: nil)
+    allow(File).to receive(:rename).and_raise(Errno::EACCES)
+    expect { store.delete_profile('keep', expected_revision: saved[:revision]) }.to raise_error(Errno::EACCES)
+    expect(store.read(:profiles, 'keep')).to eq(saved)
+  end
+
+  it 'refuses symlinked deletion destinations and sources' do
+    saved = store.save(:profiles, 'keep', {}, expected_revision: nil)
+    File.symlink(@directory, File.join(root, '.deleted'))
+    expect { store.delete_profile('keep', expected_revision: saved[:revision]) }.to raise_error(described_class::InvalidName)
+    File.symlink(File.join(root, 'profiles', 'keep.yaml'), File.join(root, 'profiles', 'link.yaml'))
+    expect { store.delete_profile('link', expected_revision: saved[:revision]) }.to raise_error(described_class::InvalidName)
+    expect(store.read(:profiles, 'keep')).to eq(saved)
+  end
+
+  it 'rechecks shared references at deletion, including per-creature plans and defaults' do
+    plan = store.save(:plans, 'sword', { 'commands' => 'attack' }, expected_revision: nil)
+    defaults = store.save(:defaults, 'usual', { 'settings' => {}, 'combat_plan' => 'sword' }, expected_revision: nil)
+    store.save(:profiles, 'hunt', { 'settings' => {}, 'defaults' => 'usual', 'creature_plans' => { 'rat' => 'sword' } }, expected_revision: nil)
+    expect(store.delete_preview(:plans, 'sword')[:dependents]).to match_array(['profiles/hunt', 'defaults/usual'])
+    expect { store.delete_document(:plans, 'sword', expected_revision: plan[:revision]) }.to raise_error(described_class::Conflict, /still used/)
+    expect { store.delete_document(:defaults, 'usual', expected_revision: defaults[:revision]) }.to raise_error(described_class::Conflict, /profiles\/hunt/)
+    unused = store.save(:plans, 'unused', {}, expected_revision: nil)
+    expect(store.delete_document(:plans, 'unused', expected_revision: unused[:revision])[:deleted]).to be(true)
+  end
+
   it 'keeps native profiles, defaults and plans separate without creating directories while browsing' do
     expect(store.list(:profiles)).to eq([])
     expect(File.exist?(root)).to be(false)
@@ -82,7 +152,8 @@ RSpec.describe EO::HunterSetup::Store do
     expect { store.save(:profiles, 'forest', { 'value' => 'replacement' }, expected_revision: first[:revision]) }.to raise_error(Errno::EACCES)
     expect(File).to have_received(:rename).exactly(3).times
     expect(store.read(:profiles, 'forest')).to eq(first)
-    expect(Dir.children(File.join(root, 'profiles')).sort).to eq(['.write.lock', 'forest.yaml'])
+    expect(Dir.children(File.join(root, 'profiles')).sort).to eq(['forest.yaml'])
+    expect(File.file?(File.join(root, '.write.lock'))).to be(true)
   end
 
   it 'imports into native storage, preserves legacy bytes, and refuses destination collisions' do

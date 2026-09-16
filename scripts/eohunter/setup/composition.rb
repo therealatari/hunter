@@ -10,6 +10,19 @@ module EO
     # Each inherited setting is replaced as a whole; arrays and structured maps
     # are never recursively merged. Geometry, targets and destinations stay local.
     class Composition
+      # Read the character's explicitly selected native default. Missing or
+      # broken active files are errors, never permission for legacy fallback.
+      # @param data_dir [String] Lich data root
+      # @param game [String] game instance
+      # @param character [String] owning character
+      # @return [String, nil] configured native name, or nil when unset
+      def self.active_profile_name(data_dir:, game:, character:)
+        store = Store.new(root: File.join(data_dir, game, character, 'eohunter'))
+        name = store.profile_visibility[:active_profile]
+        store.read(:profiles, name) if name
+        name
+      end
+
       # Native copies take precedence for both ordinary and managed launches.
       # @param name [String] local profile name
       # @param data_dir [String] Lich data root
@@ -33,10 +46,10 @@ module EO
         raw = YAML.safe_load_file(path, permitted_classes: [Symbol], aliases: false) || {}
         raise ArgumentError, 'profile must contain a mapping' unless raw.is_a?(Hash)
 
-        return raw unless raw.key?('schema_version') || raw.key?('settings')
-
-        store = Store.new(root: File.dirname(File.dirname(path)))
-        resolved = new(store: store).resolve(raw)
+        directory = File.dirname(path)
+        root = File.basename(directory) == 'bigshot_profiles' ? File.join(File.dirname(directory), 'eohunter') : File.dirname(directory)
+        store = Store.new(root: root)
+        resolved = new(store: store).resolve(raw.transform_keys(&:to_s))
         raise ArgumentError, resolved.errors.join('; ') unless resolved.valid?
 
         resolved.raw
@@ -81,10 +94,12 @@ module EO
 
       # Native documents use schema_version: 1, settings: {}, and optional
       # defaults/combat_plan names and creature_plans: { creature => plan name }.
-      # Plain legacy raw hashes remain standalone. Plans contain commands: text.
+      # Legacy custom injury rules remain overrides; otherwise character policy
+      # can supply them without writing to Bigshot. Plans contain commands: text.
       # @param profile [Hash] standalone raw profile or versioned setup document
+      # @param character_policy [Boolean] false when validating shared defaults
       # @return [Result] flat settings, origins, errors, revisions and override warnings
-      def resolve(profile)
+      def resolve(profile, character_policy: true)
         raw = {}
         provenance = {}
         errors = []
@@ -124,6 +139,7 @@ module EO
             end
             apply_creature_plans(profile.fetch('creature_plans', {}), raw, provenance, cache, revisions)
           end
+          apply_injury_policy(profile, envelope, raw, provenance, revisions, warnings) if character_policy
         rescue Store::Error, ArgumentError => e
           errors << e.message
         end
@@ -171,6 +187,35 @@ module EO
       end
 
       private
+
+      def apply_injury_policy(profile, envelope, raw, provenance, revisions, warnings)
+        explicit = envelope && profile.key?('injury_policy')
+        selected = profile['injury_policy'] if explicit
+        named = reference?(selected)
+        # Preserve even intentionally empty old overrides until the player
+        # explicitly selects a named policy or opts into the character default.
+        return if !explicit && raw.key?('wounded_eval')
+
+        unless named
+          preferences = @store.character_preferences
+          selected = preferences[:injury_policy]
+          revisions['character/injury_policy'] = preferences[:revision] if preferences[:revision]
+        end
+        if explicit && raw.key?('wounded_eval')
+          warnings << 'Selected injury policy replaces the existing wounded_eval override for this hunt'
+          raw.delete('wounded_eval')
+          provenance.delete('wounded_eval')
+        end
+        unless selected
+          warnings << 'No character injury policy is selected; configure one before relying on injury return checks' if explicit
+          return
+        end
+
+        record = @store.read(:injury_policies, selected)
+        raw['wounded_eval'] = @store.validate_injury_policy!(record[:data])
+        provenance['wounded_eval'] = "#{named ? 'injury_policies' : 'character injury policy'}/#{selected}"
+        revisions["injury_policies/#{selected}"] = record[:revision]
+      end
 
       def settings_for(document)
         raise ArgumentError, 'profile/defaults must be a mapping' unless document.is_a?(Hash)

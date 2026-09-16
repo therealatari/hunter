@@ -74,7 +74,7 @@
   function fail(error) { status(error.message || String(error), true); }
   async function api(action, args = {}) {
     if (state.disconnected) throw new Error('This setup session has disconnected. Open setup again in Lich; your draft is still visible here.');
-    if (args.kind) args = {...args, kind: {profile: 'profiles', plan: 'plans'}[args.kind] || args.kind};
+    if (args.kind) args = {...args, kind: {profile: 'profiles', plan: 'plans', injury: 'injury_policies'}[args.kind] || args.kind};
     let response;
     try { response = await fetch('/api', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-Setup-Token': token}, body: JSON.stringify({action, ...args})}); }
     catch (_) { state.disconnected = true; throw new Error('Connection lost. Keep this window to copy your draft, and reopen setup from the same character.'); }
@@ -101,9 +101,10 @@
     });
   }
   function updateHeader() {
-    $('draft-name').textContent = state.name || `Untitled ${state.kind === 'defaults' ? 'character setup' : state.kind === 'plan' ? 'Combat Plan' : 'hunt'}`;
-    $('scope').textContent = state.kind === 'defaults' ? 'SHARED CHARACTER DEFAULTS' : state.kind === 'plan' ? 'SHARED COMBAT PLAN' : 'HUNT PROFILE';
+    $('draft-name').textContent = state.name || `Untitled ${state.kind === 'defaults' ? 'character setup' : state.kind === 'plan' ? 'Combat Plan' : state.kind === 'injury' ? 'injury policy' : 'hunt'}`;
+    $('scope').textContent = state.kind === 'defaults' ? 'SHARED CHARACTER DEFAULTS' : state.kind === 'plan' ? 'SHARED COMBAT PLAN' : state.kind === 'injury' ? 'SHARED INJURY POLICY' : 'HUNT PROFILE';
     $('dirty').textContent = state.source === 'legacy' ? 'Legacy copy · not saved to Hunter' : dirty() ? 'Unsaved changes' : state.revision ? 'Saved revision' : 'New draft';
+    if (state.kind === 'profile' && state.source === 'native' && state.loadedName && state.loadedName === state.boot?.profile_visibility?.active_profile) $('dirty').textContent += ' · Active profile';
     $('guided-toggle').textContent = state.guided ? 'Advanced editor' : 'Guided setup';
     $('guided-toggle').disabled = state.kind !== 'profile';
     document.body.classList.toggle('guided', state.guided);
@@ -127,8 +128,16 @@
     finally { if (documentId === state.documentId && request === state.resolveRequest) { state.resolving = false; render(); } }
   }
   function steps() { return guide.map(([id]) => id); }
+  function sharedEditorPage() { return state.kind === 'plan' ? 'combat' : state.kind === 'injury' ? 'monitoring' : null; }
+  function pageAllowed(page) { return !sharedEditorPage() || ['manage', 'compare', 'raw', 'review', sharedEditorPage()].includes(page); }
+  function searchableField(field) {
+    if (state.kind === 'plan') return field.key === 'hunting_commands';
+    if (state.kind === 'injury') return field.key === 'wounded_eval';
+    return true;
+  }
   function renderNav() {
     const nav = $('navigation'); nav.replaceChildren(); let section;
+    if (sharedEditorPage()) nav.append(el('p', {class: 'help'}, `Editing a shared ${state.kind === 'plan' ? 'Combat Plan' : 'injury policy'}. Open a hunt from Manage profiles for other settings.`));
     if (state.guided) {
       nav.append(el('h2', {}, 'YOUR HUNT JOURNAL'));
       guide.forEach(([id, label, hint], index) => {
@@ -138,7 +147,7 @@
         nav.append(item);
       });
       nav.append(button('Back to saved hunts', () => { state.guided = false; navigate('manage'); }, 'back-to-profiles'));
-    } else for (const [group, id, label] of pages.filter(([group]) => group !== 'Guided setup')) {
+    } else for (const [group, id, label] of pages.filter(([group, id]) => group !== 'Guided setup' && pageAllowed(id))) {
       if (section !== group) { nav.append(el('h2', {}, group)); section = group; }
       const item = button(label, () => navigate(id));
       if (id === state.page) item.setAttribute('aria-current', 'page');
@@ -149,6 +158,7 @@
     $('wizard').replaceChildren();
   }
   function navigate(page, focusKey) {
+    if (!pageAllowed(page)) return status('This section belongs to a hunt profile. Save your shared configuration, then open a hunt from Manage profiles. Your draft has not changed.');
     if (focusKey || (state.guided && !steps().includes(page))) state.guided = false;
     state.page = page; render();
     $('sidebar').classList.remove('open'); $('nav-toggle').setAttribute('aria-expanded', 'false');
@@ -160,24 +170,38 @@
   function render() {
     dismissRoomActions?.();
     if (!state.boot) return;
-    updateHeader(); renderNav();
+    updateHeader(); renderNav(); search();
     const main = $('main'); main.replaceChildren();
     main.classList.toggle('area-workspace', state.guided && state.page === 'area');
+    main.classList.toggle('profile-workspace', state.page === 'manage');
     const step = guide.find(([id]) => id === state.page);
-    main.append(el('span', {class: 'eyebrow'}, state.guided ? `CHAPTER ${steps().indexOf(state.page) + 1} OF 5 · YOUR NEXT HUNT` : 'YOUR NEXT HUNT'), el('h1', {}, state.guided ? step[1] : pages.find((p) => p[1] === state.page)[2]));
-    if (descriptions[state.page]) main.append(el('p', {class: 'intro'}, descriptions[state.page]));
-    if (state.kind !== 'profile' && !['manage', 'raw', 'review', 'compare'].includes(state.page)) main.append(note(`You are editing a shared ${state.kind === 'plan' ? 'Combat Plan' : 'character setup'}. Saved changes apply to linked hunts on their next launch.`));
+    main.append(el('span', {class: 'eyebrow'}, state.guided ? `CHAPTER ${steps().indexOf(state.page) + 1} OF 5 · YOUR NEXT HUNT` : sharedEditorPage() ? 'REUSABLE CHARACTER SETTINGS' : 'YOUR NEXT HUNT'), el('h1', {}, state.guided ? step[1] : pages.find((p) => p[1] === state.page)[2]));
+    if (descriptions[state.page] && !sharedEditorPage()) main.append(el('p', {class: 'intro'}, descriptions[state.page]));
+    if (state.kind !== 'profile' && !['manage', 'raw', 'review', 'compare'].includes(state.page)) main.append(note(`You are editing a shared ${state.kind === 'plan' ? 'Combat Plan' : state.kind === 'injury' ? 'injury policy' : 'character setup'}. Saved changes apply to linked hunts on their next launch.`));
+    if (sharedEditorPage() && state.page !== 'manage') main.append(el('p', {class: 'help'}, 'Hunt-specific settings belong to a hunt profile. Save this shared configuration before switching documents.'), button('Choose a hunt profile', () => navigate('manage')));
     if (state.page === 'manage') renderManage(main);
     else if (state.page === 'raw') renderRaw(main);
     else if (state.page === 'review') renderReview(main);
     else if (state.page === 'compare') renderCompare(main);
-    else if (state.kind === 'plan') renderPlanCommands(main);
+    else if (state.kind === 'plan' && state.page === 'combat') renderPlanCommands(main);
+    else if (state.kind === 'injury' && state.page === 'monitoring') {
+      main.append(nameControl()); renderInjuryRule(main);
+      main.append(button('Save a copy as another injury policy', () => {
+        if (state.saving) return;
+        state.documentId += 1; state.readRequest += 1;
+        state.revision = null; state.loadedName = ''; state.name = state.name ? `${state.name}-copy` : '';
+        changed(); render();
+      }));
+    }
     else if (state.guided && state.page === 'character') renderCharacter(main);
     else {
       if (state.page === 'area') { renderArea(main); renderBoons(main); }
       if (state.page === 'combat') renderCombat(main);
       if (state.page === 'equipment') main.append(fieldSection('Wands and spell fallback', wandOptions));
-      if (state.page === 'rest') renderReturnOptions(main);
+      if (state.page === 'rest') {
+        renderReturnOptions(main);
+        if (!state.guided) main.append(el('section', {class: 'card'}, el('h2', {}, 'Returning because of injury'), el('p', {}, 'Choose your character injury policy or a hunt-specific override in Monitoring & limits.'), button('Choose injury policy', () => navigate('monitoring'))));
+      }
       if (state.page === 'buffs') renderBuffs(main);
       if (state.page === 'monitoring') renderInjuryRule(main);
       if (state.page === 'team') renderTeam(main);
@@ -204,16 +228,16 @@
     if (state.saving) { status('Wait for this save to finish before switching configurations.', true); return false; }
     return !dirty() || window.confirm('Replace the current unsaved draft? Copy it from Raw configuration first if you want to keep it.');
   }
-  function fresh(kind = 'profile', guided = false) {
+  function fresh(kind = 'profile', guided = false, settings = {}) {
     if (!discardOkay()) return;
     state.documentId += 1; state.readRequest += 1; state.validation = null;
-    Object.assign(state, {kind, name: '', loadedName: '', revision: null, source: 'native', draft: kind === 'plan' ? {commands: ''} : {schema_version: 1, settings: {}}, area: null, areaName: '', mapName: '', zoneId: '', guided, anyTargets: false, playContext: 'solo', mode: 'solo', sequenceDraft: null});
+    Object.assign(state, {kind, name: '', loadedName: '', revision: null, source: 'native', draft: kind === 'plan' ? {commands: ''} : {schema_version: 1, settings: clone(settings)}, area: null, areaName: '', mapName: '', zoneId: '', guided, anyTargets: false, playContext: 'solo', mode: 'solo', sequenceDraft: null});
     invalidateFootprint();
     resetProfileMap();
     state.areaRequest += 1;
-    state.baseline = clone(state.draft); state.invalid.clear(); changed(); navigate(guided ? 'character' : kind === 'plan' ? 'combat' : 'equipment');
+    state.baseline = clone(state.draft); state.invalid.clear(); changed(); navigate(guided ? 'character' : kind === 'plan' ? 'combat' : kind === 'injury' ? 'monitoring' : 'equipment');
   }
-  async function open(kind, name, source = 'native') {
+  async function open(kind, name, source = 'native', landingPage = null) {
     if (!discardOkay()) return;
     const readRequest = ++state.readRequest;
     try {
@@ -229,25 +253,107 @@
       state.invalid.clear(); changed();
       if (kind !== 'plan') { try { await validate(); } catch (error) { fail(error); } }
       if (readRequest !== state.readRequest) return;
-      navigate(kind === 'plan' ? 'combat' : kind === 'defaults' ? 'equipment' : 'area');
+      navigate(landingPage || (kind === 'plan' ? 'combat' : kind === 'injury' ? 'monitoring' : kind === 'defaults' ? 'equipment' : 'area'));
       status(source === 'legacy' ? 'Opened a compatibility source. Saving creates an EOHunter-owned copy; the source stays untouched.' : `Opened ${name}.`);
     } catch (error) { fail(error); }
   }
   function renderManage(main) {
-    main.append(el('p', {class: 'intro'}, 'Build a new hunt step by step, or pick a saved hunt below to adjust it. Nothing runs while you are setting up.'));
-    main.append(el('section', {class: 'card welcome'}, el('span', {class: 'eyebrow'}, 'START HERE'), el('h2', {}, 'Where will you hunt next?'), el('p', {}, 'Five short steps: your character, your hunting area, combat, recovery, and a final check.'), button('Create with guidance', () => fresh('profile', true), 'primary')));
-    main.append(el('details', {class: 'card'}, el('summary', {}, 'Reusable settings & current draft'), el('p', {class: 'help'}, 'Optional: share your usual equipment and combat approach across several hunts.'), el('div', {class: 'actions'}, button('New character setup', () => fresh('defaults')), button('New Combat Plan', () => fresh('plan'))), nameControl(), modeControl(), button('Edit this hunt’s settings', () => navigate('area')), button('Save as another profile (keeps links)', () => { if (state.saving) return status('Wait for the save to finish before copying.', true); state.documentId += 1; state.readRequest += 1; state.revision = null; state.loadedName = ''; state.name = state.name ? `${state.name}-copy` : ''; state.source = 'native'; changed(); render(); })));
-    for (const [title, kind, list, source] of [['Saved hunts', 'profile', state.boot.profiles, 'native'], ['Character defaults', 'defaults', state.boot.defaults, 'native'], ['Combat Plans', 'plan', state.boot.plans, 'native'], ['Copy a legacy profile', 'profile', state.boot.legacy_profiles, 'legacy']]) {
+    main.append(el('div', {class: 'management-toolbar'}, el('p', {class: 'intro'}, 'Open a saved hunt or create one with guidance. Nothing runs from this page.'), button('Create with guidance', () => fresh('profile', true), 'primary')));
+    const overview = el('div', {class: 'management-overview'});
+    const active = state.boot.profile_visibility?.active_profile;
+    overview.append(el('section', {class: 'card', 'aria-label': 'Active profile'}, el('h2', {}, 'Active profile'),
+      el('p', {}, active ? `Default hunt: ${active}` : 'No default hunt selected.'),
+      el('p', {class: 'help'}, 'Used by ;eohunter with no profile name. Its settings load behind this landing page; no hunt starts.'),
+      el('div', {class: 'actions'}, active ? button('Edit active hunt', () => open('profile', active)) : null,
+        active ? button('Clear active profile', () => manageProfile('active', null)) : null)));
+    const injuryDefault = state.boot.character_preferences?.injury_policy;
+    overview.append(el('section', {class: 'card', 'aria-label': 'Character injury default'}, el('h2', {}, 'Character injury default'),
+      el('p', {}, injuryDefault ? `Default injury policy: ${injuryDefault}` : 'No character injury policy selected.'),
+      el('p', {class: 'help'}, 'Used on the next hunt unless overridden. Existing custom injury rules stay intact.'),
+      el('div', {class: 'actions'}, injuryDefault ? button('Edit default injury policy', () => open('injury', injuryDefault)) : null,
+        injuryDefault ? button('Clear character injury default', () => manageProfile('injury_default', null)) : null)));
+    main.append(overview);
+    const showHidden = el('input', {type: 'checkbox', checked: state.showHidden || false, 'aria-label': 'Show hidden profiles'});
+    showHidden.addEventListener('change', () => { state.showHidden = showHidden.checked; render(); });
+    main.append(el('div', {class: 'management-toolbar'}, el('label', {class: 'control-label'}, showHidden, ' Show hidden profiles'),
+      button('Refresh profile list', () => refreshProfileList().then(() => render()).catch(fail))),
+      el('p', {class: 'help'}, 'Hide removes a hunt from this list only. Delete keeps a recovery backup. Bigshot originals stay read-only.'));
+    const huntColumn = el('div'), sharedColumn = el('div');
+    main.append(el('div', {class: 'management-catalog'}, huntColumn, sharedColumn));
+    for (const [title, kind, list, source] of [['Saved hunts', 'profile', state.boot.profiles, 'native'], ['Character defaults', 'defaults', state.boot.defaults, 'native'], ['Combat Plans', 'plan', state.boot.plans, 'native'], ['Injury policies', 'injury', state.boot.injury_policies, 'native'], ['Copy a legacy profile', 'profile', state.boot.legacy_profiles, 'legacy']]) {
       const section = el('section', {class: 'card'}, el('h2', {}, title));
-      if (!names(list).length) section.append(el('p', {class: 'empty'}, 'None found for this character.'));
-      else section.append(el('div', {class: 'list'}, names(list).map((name) => el('div', {class: 'list-item'}, el('div', {class: 'grow'}, el('strong', {}, name), el('span', {class: 'small muted'}, source === 'legacy' ? 'Read-only compatibility source' : 'EOHunter-owned')), button(source === 'legacy' ? 'Open as copy' : 'Edit', () => open(kind, name, source))))));
-      main.append(section);
+      if (source === 'native') section.append(button(kind === 'defaults' ? 'Add character defaults' : kind === 'plan' ? 'Add combat plan' : kind === 'injury' ? 'Add injury policy' : 'Add hunt profile', () => fresh(kind, kind === 'profile')));
+      const hidden = kind === 'profile' ? state.boot.profile_visibility?.hidden?.[source] || [] : [];
+      const visible = names(list).filter((name) => state.showHidden || !hidden.includes(name) || (source === 'native' && name === active));
+      if (!visible.length) section.append(el('p', {class: 'empty'}, names(list).length ? 'All profiles in this section are hidden. Select Show hidden profiles to restore them.' : 'None found for this character.'));
+      else section.append(el('div', {class: 'list'}, visible.map((name) => {
+        const current = source === 'native' && (kind === 'profile' && name === active || kind === 'injury' && name === injuryDefault);
+        const row = el('div', {class: `list-item${current ? ' active-profile' : ''}`}, el('div', {class: 'grow'}, el('strong', {}, name),
+          el('span', {class: 'small muted'}, `${source === 'legacy' ? 'Read-only compatibility source' : 'EOHunter-owned'}${current ? kind === 'injury' ? ' · CHARACTER DEFAULT' : ' · ACTIVE PROFILE' : ''}${hidden.includes(name) ? ' · Hidden' : ''}`)),
+          button(source === 'legacy' ? 'Open as copy' : 'Edit', () => open(kind, name, source)));
+        if (kind === 'profile') {
+          if (source === 'native' && !current) row.append(button('Set active', () => manageProfile('active', name)));
+          if (!current) row.append(button(hidden.includes(name) ? 'Show' : 'Hide', () => manageProfile('visibility', name, source, !hidden.includes(name))));
+        }
+        if (source === 'native') {
+          if (kind === 'injury' && !current) row.append(button('Use as character default', () => manageProfile('injury_default', name)));
+          const remove = button('Delete…', () => manageProfile('delete', name, 'native', false, kind));
+          remove.disabled = current; remove.title = current ? 'Clear or change the selected default before deleting it.' : 'Confirm removal of this saved configuration; a recovery backup is kept.';
+          row.append(remove);
+        }
+        if (state.manageBusy || state.saving) row.querySelectorAll('button').forEach((control) => { control.disabled = true; });
+        return row;
+      })));
+      (kind === 'profile' ? huntColumn : sharedColumn).append(section);
     }
+    main.append(el('details', {class: 'card'}, el('summary', {}, 'Reusable settings & current draft'), el('p', {class: 'help'}, 'Optional: share your usual equipment and combat approach across several hunts.'), el('div', {class: 'actions'}, button('New character setup', () => fresh('defaults')), button('New Combat Plan', () => fresh('plan'))), nameControl(), sharedEditorPage() ? null : modeControl(), button(sharedEditorPage() ? 'Return to shared editor' : 'Edit this hunt’s settings', () => navigate(sharedEditorPage() || 'area')), button('Save as another profile (keeps links)', () => { if (state.saving) return status('Wait for the save to finish before copying.', true); state.documentId += 1; state.readRequest += 1; state.revision = null; state.loadedName = ''; state.name = state.name ? `${state.name}-copy` : ''; state.source = 'native'; changed(); render(); })));
+  }
+  async function refreshProfileList() {
+    const result = await api('bootstrap');
+    for (const key of ['profiles', 'legacy_profiles', 'defaults', 'plans', 'injury_policies', 'character_preferences', 'profile_visibility']) state.boot[key] = result[key];
+    state.validation = null; state.validationGeneration = -1;
+    if (state.kind === 'profile' || state.kind === 'defaults') await validate();
+    updateHeader();
+  }
+  async function manageProfile(action, name, source = 'native', hidden = false, kind = 'profile') {
+    if (state.manageBusy || state.saving) return status('Wait for the current operation to finish.', true);
+    const sameDraft = () => state.kind === kind && state.source === source && state.loadedName === name;
+    if (action === 'delete' && sameDraft() && dirty()) return status('Save or discard this profile’s unsaved changes before deleting its saved file.', true);
+    if (action === 'active' && name && dirty()) return status('Save or discard the current draft before switching the active profile.', true);
+    const documentId = state.documentId;
+    state.manageBusy = true; render();
+    try {
+      if (action === 'visibility') {
+        state.boot.profile_visibility = await api('profile_visibility', {name, source, hidden, revision: state.boot.profile_visibility?.revision ?? null});
+        status(`${name} ${hidden ? 'hidden from the list' : 'shown again'}. Its profile file is unchanged.`);
+      } else if (action === 'active') {
+        state.boot.profile_visibility = await api('set_active_profile', {name, revision: state.boot.profile_visibility?.revision ?? null});
+        if (name && documentId === state.documentId) await open('profile', name, 'native', 'manage');
+        status(name ? `${name} is now the active default. No hunt was started.` : 'Active default cleared. Launch with an explicit profile name.');
+      } else if (action === 'injury_default') {
+        if (!name && !window.confirm('Clear the character injury default? Hunts without an override will no longer receive that injury rule on their next launch.')) return;
+        state.boot.character_preferences = await api('set_character_injury_policy', {name, revision: state.boot.character_preferences?.revision ?? null});
+        state.validation = null; state.validationGeneration = -1;
+        if (state.kind === 'profile') await validate();
+        status(name ? `${name} is the character injury default for subsequent hunts. Existing custom overrides are preserved.` : 'Character injury default cleared. Running hunts are unchanged.');
+      } else {
+        const preview = await api('delete_preview', {kind, name, source});
+        if (preview.dependents?.length) throw new Error(`Cannot delete ${name}: still used by ${preview.dependents.join(', ')}. Edit those saved configurations to remove the links first.`);
+        const fallback = preview.legacy_fallback ? '\nA Bigshot profile with the same name will remain and may be used by explicit-name launches.' : '';
+        const label = kind === 'defaults' ? 'character defaults' : kind === 'plan' ? 'combat plan' : kind === 'injury' ? 'injury policy' : 'hunt profile';
+        if (!window.confirm(`Delete saved EOHunter ${label} “${name}”?\nA recoverable backup will be kept. Running hunts are not stopped or changed.${fallback}`)) return;
+        const result = await api('delete_document', {kind, name, source, revision: preview.revision, confirm: true});
+        if (sameDraft()) { state.revision = null; state.loadedName = ''; changed(); }
+        await refreshProfileList();
+        status(`Deleted ${name}. Recovery copy: eohunter/${result.backup}. Any open draft is retained; saving it creates a new profile.`);
+      }
+    } catch (error) { fail(error); }
+    finally { state.manageBusy = false; render(); }
   }
   function nameControl() {
     const input = el('input', {id: 'save-name', type: 'text', value: state.name, placeholder: 'e.g. Rift evening hunt', autocomplete: 'off'});
     input.addEventListener('input', () => { state.name = input.value; changed(); });
-    return el('div', {class: 'field'}, el('label', {for: 'save-name'}, state.kind === 'profile' ? 'Hunt name' : state.kind === 'defaults' ? 'Character setup name' : 'Combat Plan name'), input, el('p', {class: 'help'}, 'A new name creates a separate EOHunter file. Existing names require their current saved revision.'));
+    return el('div', {class: 'field'}, el('label', {for: 'save-name'}, state.kind === 'profile' ? 'Hunt name' : state.kind === 'defaults' ? 'Character setup name' : state.kind === 'injury' ? 'Injury policy name' : 'Combat Plan name'), input, el('p', {class: 'help'}, 'A new name creates a separate EOHunter file. Existing names require their current saved revision.'));
   }
   function fieldSection(title, keys) {
     const fields = keys.map((key) => state.boot.fields.find((field) => field.key === key)).filter(Boolean);
@@ -343,6 +449,12 @@
       ['Choosing fights', 'When to begin a fight and whether to switch targets.', ['priority', 'lone_targets_only', 'ignore_disks']],
       ['Looting', 'What handles loot, when to collect it, and your stance while doing so.', ['loot_script', 'delay_loot', 'loot_stance', 'final_loot']],
       ['When to leave a room', 'Crowd and environmental triggers for leaving the current room—not necessarily returning to rest.', ['flee_count', 'flee_clouds', 'flee_vines', 'flee_webs', 'flee_voids']]
+    ] : page === 'rest' ? [
+      ['Rest locations', 'Where to wait nearby and where to return for town services.', ['resting_room_id', 'field_rest_room_id']],
+      ['Ready to hunt again', 'Resource and mind thresholds that must be satisfied before leaving rest.', ['rest_till_exp', 'rest_till_mana', 'rest_till_spirit', 'rest_till_percentstamina']],
+      ['Town rest services', 'Commands and scripts to run at your main rest location, and what happens afterward.', ['resting_commands', 'resting_scripts', 'after_town_rest']],
+      ['Before leaving for a hunt', 'Preparation commands and scripts associated with the hunting phase.', ['hunting_prep_commands', 'hunting_scripts']],
+      ['Field rest services', 'Nearby recovery and preparation, separate from your town routine. Field rest currently supports solo hunts only.', ['field_rest_for', 'field_rest_commands', 'field_rest_scripts', 'field_return_waypoint_ids', 'field_rallypoint_room_ids', 'field_hunting_prep_commands', 'field_rest_timeout_seconds']]
     ] : [];
     const grouped = new Set();
     for (const [title, description, keys] of groups) {
@@ -353,7 +465,7 @@
         el('div', {class: 'field-grid'}, members.map(fieldControl))));
     }
     const remaining = standard.filter((field) => !grouped.has(field.key));
-    if (remaining.length) main.append(el('section', {class: 'card'}, groups.length ? el('h2', {}, 'Other hunting settings') : null,
+    if (remaining.length) main.append(el('section', {class: 'card'}, groups.length ? el('h2', {}, 'Other settings') : null,
       el('div', {class: 'field-grid'}, remaining.map(fieldControl))));
     if (advanced.length) main.append(el('details', {class: 'card'}, el('summary', {}, `Advanced settings (${advanced.length})`), el('div', {class: 'field-grid'}, advanced.map(fieldControl))));
   }
@@ -427,9 +539,43 @@
     panel.append(error, el('details', {}, el('summary', {}, 'Original boon lists and extension names'), fieldSection('Native boon lists', ['boons_ignore', 'boons_flee'])));
     main.append(panel);
   }
+  function renderInjurySelection(main) {
+    const explicit = own(state.draft, 'injury_policy');
+    const custom = !explicit && (own(state.draft.settings, 'wounded_eval') || state.validation?.provenance?.wounded_eval?.startsWith('defaults/'));
+    const selected = explicit && state.draft.injury_policy ? state.draft.injury_policy : state.boot.character_preferences?.injury_policy;
+    const select = el('select', {'aria-label': 'Injury policy for this hunt', title: 'Inherit your character default, or select a named policy for this hunt only.'},
+      el('option', {value: 'character'}, `Use character default${state.boot.character_preferences?.injury_policy ? ` — ${state.boot.character_preferences.injury_policy}` : ' — none selected'}`));
+    if (custom) select.append(el('option', {value: 'custom'}, 'Keep existing custom injury rule'));
+    const policies = names(state.boot.injury_policies);
+    if (explicit && state.draft.injury_policy && !policies.includes(state.draft.injury_policy)) policies.push(state.draft.injury_policy);
+    policies.forEach((name) => select.append(el('option', {value: `policy:${name}`}, name)));
+    select.value = custom ? 'custom' : explicit && state.draft.injury_policy ? `policy:${state.draft.injury_policy}` : 'character';
+    select.disabled = state.resolving;
+    select.addEventListener('change', () => {
+      if (select.value === 'custom') return;
+      state.draft.injury_policy = select.value === 'character' ? null : select.value.slice(7);
+      delete state.draft.settings.wounded_eval;
+      changed(); resolveInheritance();
+    });
+    const card = el('section', {class: 'card', id: 'injury-policy-selection'}, el('h2', {}, 'Injury policy'),
+      el('label', {}, 'Which injury policy should this hunt use?', select),
+      el('p', {class: 'help'}, 'Named policies belong to this character. The character default applies across hunts; choose another here only when this area needs different rules. Saving or switching a default affects the next launch, never a running hunt.'),
+      note(custom ? 'This hunt retains an existing custom rule. Select Use character default to replace it deliberately.' : state.resolving ? 'Resolving the selected policy…' : selected ? `Selected: ${selected}${explicit && state.draft.injury_policy ? ' (this hunt only)' : ' (character default)'}.` : 'No character injury policy is selected. Create one and use it as the character default.', custom || !selected ? 'warning' : ''));
+    if (state.validation?.errors?.length) card.append(issues('Policy/configuration errors', state.validation.errors, 'error'));
+    if (!custom && state.validation?.effective?.wounded_eval) {
+      card.append(el('details', {}, el('summary', {}, 'Effective injury rule and source'), el('pre', {}, state.validation.effective.wounded_eval), el('p', {class: 'help'}, state.validation.provenance?.wounded_eval || '')));
+    }
+    const expression = custom ? effective('wounded_eval') : state.validation?.effective?.wounded_eval;
+    card.append(button(expression ? 'Copy this rule to a new injury policy' : 'Create an injury policy', () => fresh('injury', false, typeof expression === 'string' && expression.trim() ? {wounded_eval: expression} : {})),
+      button('Manage injury policies', () => navigate('manage')));
+    if (!custom && selected) card.append(button('Edit selected injury policy', () => open('injury', selected)));
+    main.append(card);
+    return custom;
+  }
   function renderInjuryRule(main) {
     const codec = window.HunterInjuryEditor, field = state.boot.fields.find((field) => field.key === 'wounded_eval');
     if (!codec || !field) return;
+    if (state.kind === 'profile' && !renderInjurySelection(main)) return;
     const raw = effective('wounded_eval'), decoded = codec.decode(raw);
     let model = decoded || codec.defaults();
     const supported = state.boot.capabilities?.injury_checks || {};
@@ -947,6 +1093,10 @@
     const summary = el('dl', {class: 'review-summary'});
     [['Character', `${state.boot.context?.character || 'Unknown'} · ${state.boot.context?.game || 'Unknown game'}`], ['Scope', state.kind], ['Source', state.source === 'legacy' ? 'Legacy source → new EOHunter copy' : 'EOHunter-owned'], ['Defaults', state.draft.defaults || 'Independent profile'], ['Combat Plan', state.draft.combat_plan || 'Inherited / existing routines'], ['Targets', state.draft.settings?.targets || 'Empty target list: all otherwise eligible creatures'], ['Validation mode', state.mode], ['Hunt start', 'No hunt is started by saving']].forEach(([label, value]) => summary.append(el('dt', {}, label), el('dd', {}, String(value))));
     main.append(el('section', {class: 'card'}, el('h2', {}, 'At a glance'), summary));
+    if (state.kind === 'profile') {
+      const custom = !own(state.draft, 'injury_policy') && (own(state.draft.settings, 'wounded_eval') || state.validation?.provenance?.wounded_eval?.startsWith('defaults/'));
+      summary.append(el('dt', {}, 'Injury policy'), el('dd', {}, custom ? 'Existing custom injury rule (preserved override)' : state.draft.injury_policy ? `${state.draft.injury_policy} (hunt override)` : `Character default: ${state.boot.character_preferences?.injury_policy || 'none selected'}`));
+    }
     const results = el('div', {id: 'validation-results'});
     const show = (validation) => {
       results.replaceChildren();
@@ -968,9 +1118,13 @@
           const linked = [];
           for (const name of names(state.boot.profiles)) {
             const profile = (await api('read', {kind: 'profile', name})).data;
-            if (state.kind === 'defaults' ? profile.defaults === state.loadedName : profile.combat_plan === state.loadedName || Object.values(profile.creature_plans || {}).includes(state.loadedName)) linked.push(name);
+            if (state.kind === 'injury') {
+              const checked = await api('validate', {kind: 'profile', data: profile});
+              const source = checked.provenance?.wounded_eval;
+              if ([`injury_policies/${state.loadedName}`, `character injury policy/${state.loadedName}`].includes(source)) linked.push(name);
+            } else if (state.kind === 'defaults' ? profile.defaults === state.loadedName : profile.combat_plan === state.loadedName || Object.values(profile.creature_plans || {}).includes(state.loadedName)) linked.push(name);
           }
-          impact.replaceChildren(note(linked.length ? `Directly linked hunts: ${linked.join(', ')}. Plans may also be inherited through character defaults.` : 'No directly linked hunts found. A plan may also be inherited through character defaults.'));
+          impact.replaceChildren(note(state.kind === 'injury' ? `Saved native hunts using this policy: ${linked.join(', ') || 'none'}. Legacy profiles without custom injury rules can also inherit the character default.` : linked.length ? `Directly linked hunts: ${linked.join(', ')}. Plans may also be inherited through character defaults.` : 'No directly linked hunts found. A plan may also be inherited through character defaults.'));
         } catch (error) { fail(error); }
       }), impact));
     }
@@ -978,7 +1132,7 @@
     main.append(note('Only EOHunter-owned files are written. Legacy Bigshot profiles and standalone ecleanse settings remain untouched.'), saveButton);
   }
   async function save() {
-    if (state.saving) return;
+    if (state.saving || state.manageBusy) return;
     if (state.sequenceDraft) return status('Save or cancel the new combat sequence first. Your hunt draft is still intact.', true);
     if (!state.name.trim()) return status('Give this configuration a name before saving.', true);
     if (state.invalid.size) return status('Correct invalid JSON fields before saving. Your draft is preserved.', true);
@@ -993,7 +1147,7 @@
       if (documentId !== state.documentId) return;
       state.revision = result.revision; state.loadedName = name; state.source = 'native'; state.baseline = data;
       if (generation === state.generation) state.name = name;
-      const listKey = kind === 'profile' ? 'profiles' : kind === 'plan' ? 'plans' : 'defaults';
+      const listKey = kind === 'profile' ? 'profiles' : kind === 'plan' ? 'plans' : kind === 'injury' ? 'injury_policies' : 'defaults';
       if (!names(state.boot[listKey]).includes(name)) state.boot[listKey].push(name);
       status(`Saved “${name}” to EOHunter. ${missingFor(validation).length ? 'Saved as an unfinished draft; complete the review items before hunting. ' : ''}No hunt was started.${generation !== state.generation ? ' Newer draft changes remain unsaved.' : ''}`); render();
     } catch (error) { fail(error); }
@@ -1754,8 +1908,9 @@
   function search() {
     const query = $('search').value.trim().toLowerCase(), results = $('search-results'); results.replaceChildren();
     if (!query || !state.boot) return;
-    const matches = state.boot.fields.filter((field) => [field.key, field.label, field.help, ...(field.aliases || [])].join(' ').toLowerCase().includes(query));
+    const matches = state.boot.fields.filter((field) => searchableField(field) && [field.key, field.label, field.help, ...(field.aliases || [])].join(' ').toLowerCase().includes(query));
     results.append(el('p', {class: 'small muted'}, `${matches.length} matching settings`));
+    if (sharedEditorPage() && !matches.length) results.append(el('p', {class: 'help'}, 'Search is limited to this shared configuration. Open a hunt from Manage profiles to find its other settings.'));
     for (const field of matches.slice(0, 30)) {
       const page = normalizedPage(field.page);
       results.append(button('', () => navigate(page, field.key), 'search-result'));
@@ -1779,6 +1934,7 @@
       for (const key of ['fields', 'profiles', 'legacy_profiles', 'defaults', 'plans']) state.boot[key] ||= [];
       $('context').textContent = `${state.boot.context?.character || 'Character'} / ${state.boot.context?.game || 'Game'}`;
       render(); status('Connected. Changes stay in this draft until you save.');
+      if (state.boot.profile_visibility?.active_profile) await open('profile', state.boot.profile_visibility.active_profile, 'native', 'manage');
     } catch (error) { fail(error); $('main').replaceChildren(el('h1', {}, 'Setup could not connect'), note(error.message, 'error')); }
   })();
 })();

@@ -42,6 +42,19 @@ RSpec.describe 'native profile runtime reads' do
     expect { load_profile('hunt') }.to raise_error(ArgumentError, /missing/)
   end
 
+  it 'loads the shared injury rule into the existing evaluator input once per launch' do
+    policy = { 'schema_version' => 1, 'settings' => { 'wounded_eval' => 'Char.percent_health <= 70' } }
+    save(:injury_policies, 'normal', policy)
+    @store.set_character_injury_policy('normal', expected_revision: nil)
+    save(:profiles, 'hunt', { 'schema_version' => 1, 'settings' => { 'hunting_commands' => 'attack' } })
+    running = load_profile('hunt')
+    expect(running['wounded_eval']).to eq('Char.percent_health <= 70')
+    saved = @store.read(:injury_policies, 'normal')
+    @store.save(:injury_policies, 'normal', policy.merge('settings' => { 'wounded_eval' => 'Char.percent_health <= 50' }), expected_revision: saved[:revision])
+    expect(running['wounded_eval']).to eq('Char.percent_health <= 70')
+    expect(load_profile('hunt')['wounded_eval']).to eq('Char.percent_health <= 50')
+  end
+
   it 'retains standalone legacy profile semantics' do
     path = File.join(@directory, 'legacy.yaml')
     File.write(path, YAML.dump({ 'fried' => '75', 'hunting_commands' => 'attack target', 'pull' => false }))

@@ -204,6 +204,158 @@ try {
     assert.deepEqual(await rawDraft(page), before, 'Grouping and browsing must not change the draft');
   });
 
+  await check('profile management hides, restores and confirms recoverable deletion', async (page) => {
+    await api('save', {kind: 'profiles', name: 'Disposable hunt', revision: null, data: original.data});
+    await page.getByRole('button', {name: 'Refresh profile list', exact: true}).click();
+    const row = () => page.locator('.list-item').filter({has: page.getByText('Disposable hunt', {exact: true})});
+    await row().getByRole('button', {name: 'Hide', exact: true}).click();
+    await row().waitFor({state: 'detached'});
+    await page.goto('about:blank');
+    await page.goto(url); // New document: the editor deliberately removes its token from the address bar.
+    await page.getByLabel('Show hidden profiles', {exact: true}).check();
+    await row().getByRole('button', {name: 'Show', exact: true}).click();
+    await row().getByRole('button', {name: 'Hide', exact: true}).waitFor();
+    page.removeAllListeners('dialog');
+    const cancelled = new Promise((resolve) => page.once('dialog', async (dialog) => { await dialog.dismiss(); resolve(); }));
+    await row().getByRole('button', {name: 'Delete…', exact: true}).click();
+    await within(cancelled, 'Delete confirmation was not displayed');
+    assert.deepEqual((await api('read', {kind: 'profiles', name: 'Disposable hunt'})).data, original.data);
+    page.once('dialog', (dialog) => dialog.accept());
+    await row().getByRole('button', {name: 'Delete…', exact: true}).click();
+    await row().waitFor({state: 'detached'});
+    assert.match(await page.locator('#status').textContent(), /Recovery copy/);
+    assert.equal((await api('bootstrap')).profiles.includes('Disposable hunt'), false);
+  });
+
+  await check('active profile is explicit, highlighted, protected and reopened on setup startup', async (page) => {
+    const row = () => page.locator('.list-item').filter({has: page.getByText('Fixture hunt', {exact: true})});
+    try {
+      await row().getByRole('button', {name: 'Set active', exact: true}).click();
+      await page.waitForFunction(() => document.getElementById('status').textContent.includes('is now the active default'));
+      await page.goto('about:blank');
+      await page.goto(url); // Reopen the full authenticated launch URL in a fresh document.
+      await page.waitForFunction(() => document.getElementById('status').textContent === 'Opened Fixture hunt.');
+      assert.match(await page.locator('#dirty').textContent(), /Active profile/);
+      assert.equal(await page.locator('#draft-name').textContent(), 'Fixture hunt');
+      assert.equal(await page.locator('#main > h1').textContent(), 'Manage profiles', 'Setup lands on profile management even with an active hunt');
+      await nav(page, 'Monitoring & limits');
+      const selected = await api('read', {kind: 'profiles', name: 'Fixture hunt'});
+      const checked = await api('validate', {data: selected.data});
+      const expectedFried = checked.effective.fried ?? (await api('bootstrap')).fields.find((field) => field.key === 'fried').default;
+      assert.equal(await page.locator('#field-fried').inputValue(), String(expectedFried));
+      await page.locator('#navigation').getByRole('button', {name: 'Manage profiles', exact: true}).click();
+      assert.match(await row().getAttribute('class'), /active-profile/);
+      assert.equal(await row().getByRole('button', {name: 'Delete…', exact: true}).isDisabled(), true);
+      assert.equal(await row().getByRole('button', {name: 'Hide', exact: true}).count(), 0);
+      await page.getByRole('button', {name: 'Clear active profile', exact: true}).click();
+      await page.getByText('No default hunt selected.', {exact: true}).waitFor();
+    } finally {
+      const preferences = (await api('bootstrap')).profile_visibility;
+      if (preferences.active_profile) await api('set_active_profile', {name: null, revision: preferences.revision});
+    }
+  });
+
+  await check('manage profiles uses a compact responsive dashboard as its landing page', async (page) => {
+    assert.equal(await page.locator('#main > h1').textContent(), 'Manage profiles');
+    await page.setViewportSize({width: 1600, height: 1000});
+    const active = page.getByRole('region', {name: 'Active profile', exact: true});
+    const injury = page.getByRole('region', {name: 'Character injury default', exact: true});
+    const first = await active.boundingBox(), second = await injury.boundingBox();
+    assert.equal(Math.round(first.y), Math.round(second.y), 'Default summaries should share a desktop row');
+    assert.ok(second.x > first.x + first.width, 'Default summaries must not overlap');
+    assert.ok(first.height < 230 && second.height < 230, 'Empty summaries should not become full-page cards');
+    const catalog = await page.locator('.management-catalog').boundingBox();
+    assert.ok(catalog.width > 1100, 'Dashboard should use available desktop width');
+    if (process.env.SETUP_SCREENSHOTS) await page.screenshot({path: `${process.env.SETUP_SCREENSHOTS}/manage-dashboard-desktop.png`});
+    await page.setViewportSize({width: 390, height: 844});
+    const narrowFirst = await active.boundingBox(), narrowSecond = await injury.boundingBox();
+    assert.ok(narrowSecond.y >= narrowFirst.y + narrowFirst.height, 'Summaries should stack on mobile');
+    assert.equal(await page.evaluate(() => document.querySelector('#content-pane').scrollWidth <= document.querySelector('#content-pane').clientWidth + 1), true, 'Dashboard should not scroll sideways');
+    if (process.env.SETUP_SCREENSHOTS) await page.screenshot({path: `${process.env.SETUP_SCREENSHOTS}/manage-dashboard-mobile.png`});
+  });
+
+  await check('shared sections have create links and refuse deletion of referenced plans', async (page) => {
+    const section = (title) => page.locator('section.card').filter({has: page.getByRole('heading', {name: title, exact: true})});
+    await section('Character defaults').getByRole('button', {name: 'Add character defaults', exact: true}).click();
+    assert.match(await page.locator('#draft-name').textContent(), /Untitled|New|Unnamed/i);
+    await page.locator('#navigation').getByRole('button', {name: 'Manage profiles', exact: true}).click();
+    await section('Combat Plans').getByRole('button', {name: 'Add combat plan', exact: true}).click();
+    await page.getByRole('heading', {name: 'Combat sequence', exact: true}).waitFor();
+    await page.locator('#navigation').getByRole('button', {name: 'Manage profiles', exact: true}).click();
+    const row = page.locator('.list-item').filter({has: page.getByText('No fire', {exact: true})});
+    await api('save', {kind: 'profiles', name: 'Plan dependent', revision: null, data: {schema_version: 1, settings: {}, combat_plan: 'No fire'}});
+    await row.getByRole('button', {name: 'Delete…', exact: true}).click();
+    await page.waitForFunction(() => document.getElementById('status').textContent.includes('still used by profiles/Plan dependent'));
+    assert.equal((await api('bootstrap')).plans.includes('No fire'), true);
+  });
+
+  await check('shared editor navigation never labels a combat sequence as monitoring', async (page) => {
+    await page.getByRole('button', {name: 'Add combat plan', exact: true}).click();
+    await page.getByRole('heading', {name: 'Combat sequence', exact: true}).waitFor();
+    const monitoring = page.locator('#navigation').getByRole('button', {name: 'Monitoring & limits', exact: true});
+    if (await monitoring.count()) {
+      await monitoring.click();
+      assert.equal(await page.getByRole('heading', {name: 'Combat sequence', exact: true}).count(), 0,
+        'Monitoring & limits incorrectly renders the shared Combat Plan editor');
+    }
+    assert.equal(await monitoring.count(), 0, 'Hunt-only navigation should not be offered while editing a standalone Combat Plan');
+    await page.getByLabel('Combat Plan name', {exact: true}).fill('Navigation plan');
+    await page.getByText('Original routine text (advanced)', {exact: true}).click();
+    await page.getByLabel('Original combat routine', {exact: true}).fill('incant 703, incant 719, incant 711, incant 705(x3)');
+    await page.getByLabel('Original combat routine', {exact: true}).press('Tab');
+    await page.locator('#search').fill('fried');
+    assert.equal(await page.locator('#search-results button').count(), 0);
+    assert.match(await page.locator('#search-results').textContent(), /limited to this shared configuration/);
+    await page.getByRole('button', {name: 'Choose a hunt profile', exact: true}).click();
+    const draft = await rawDraft(page);
+    assert.equal(draft.commands, 'incant 703, incant 719, incant 711, incant 705(x3)');
+    await saveDraft(page);
+    await editNamed(page, 'Fixture hunt');
+    await nav(page, 'Monitoring & limits');
+    assert.equal(await page.locator('#field-fried').count(), 1);
+    assert.equal(await page.getByRole('heading', {name: 'Combat sequence', exact: true}).count(), 0);
+    await nav(page, 'Buffs');
+    assert.equal(await page.getByRole('heading', {name: 'Combat sequence', exact: true}).count(), 0);
+    assert.match(await page.locator('#search-results').textContent(), /Return when my mind is full/);
+    assert.equal((await api('read', {kind: 'plans', name: 'Navigation plan'})).data.commands, draft.commands);
+  });
+
+  await check('shared injury navigation exposes only policy settings and preserves the draft', async (page) => {
+    await page.getByRole('button', {name: 'Add injury policy', exact: true}).click();
+    assert.equal(await page.locator('#navigation').getByRole('button', {name: 'Combat Plans', exact: true}).count(), 0);
+    assert.equal(await page.locator('#navigation').getByRole('button', {name: 'Rest & services', exact: true}).count(), 0);
+    await page.getByLabel('Injury return preset', {exact: true}).selectOption('caster');
+    await page.getByRole('button', {name: 'Apply injury return rule', exact: true}).click();
+    await page.locator('#search').fill('wounded_eval');
+    assert.equal(await page.locator('#search-results button').count(), 1);
+    await page.getByRole('button', {name: 'Choose a hunt profile', exact: true}).click();
+    const draft = await rawDraft(page);
+    assert.match(draft.settings.wounded_eval, /able_to_cast/);
+    await nav(page, 'Monitoring & limits');
+    assert.equal(await page.getByLabel('Return at or below health percent', {exact: true}).inputValue(), '70');
+  });
+
+  await check('rest settings are grouped by location, readiness, services and preparation', async (page) => {
+    await editNamed(page, 'Fixture hunt');
+    await page.locator('#navigation').getByRole('button', {name: 'Rest & services', exact: true}).click();
+    const groups = {
+      'Rest locations': ['resting_room_id', 'field_rest_room_id'],
+      'Ready to hunt again': ['rest_till_exp', 'rest_till_mana', 'rest_till_spirit', 'rest_till_percentstamina'],
+      'Town rest services': ['resting_commands', 'resting_scripts', 'after_town_rest'],
+      'Before leaving for a hunt': ['hunting_prep_commands', 'hunting_scripts'],
+      'Field rest services': ['field_rest_for', 'field_rest_commands', 'field_rest_scripts', 'field_hunting_prep_commands', 'field_rest_timeout_seconds']
+    };
+    for (const [name, keys] of Object.entries(groups)) {
+      const section = page.getByRole('region', {name, exact: true});
+      await section.getByRole('heading', {name, exact: true}).waitFor();
+      for (const key of keys) {
+        assert.equal(await section.locator(`#field-${key}`).count(), 1);
+        assert.equal(await page.locator(`#field-${key}`).count(), 1);
+      }
+    }
+    if (process.env.SETUP_SCREENSHOTS) await page.screenshot({path: `${process.env.SETUP_SCREENSHOTS}/rest-groups.png`});
+  });
+
   await check('guided gaps: boon choices preserve extensions and round-trip through save', async (page) => {
     await api('save', {kind: 'profiles', name: 'Boon panel test', revision: null, data: {
       schema_version: 1, settings: {...original.data.settings, boons_ignore: ['future_boon', 'dispelling'], boons_flee: ['another_extension']}
@@ -652,6 +804,9 @@ try {
   });
 
   await check('guided injury presets preserve custom Ruby until Apply and survive saving', async (page) => {
+    const legacyRule = await api('read', {kind: 'profiles', name: 'Other hunt'});
+    legacyRule.data.settings.wounded_eval = 'custom_injury_rule?';
+    await api('save', {kind: 'profiles', name: 'Other hunt', data: legacyRule.data, revision: legacyRule.revision});
     await editNamed(page, 'Other hunt');
     await nav(page, 'Monitoring & limits');
     const card = page.locator('#injury-rule');
@@ -676,6 +831,73 @@ try {
     const restored = await api('read', {kind: 'profiles', name: 'Other hunt'});
     delete restored.data.settings.wounded_eval;
     await api('save', {kind: 'profiles', name: 'Other hunt', data: restored.data, revision: restored.revision});
+  });
+
+  await check('injury policies share a character default, support hunt overrides and preserve custom rules', async (page) => {
+    try {
+      await nav(page, 'Manage profiles');
+      await page.getByRole('button', {name: 'Add injury policy', exact: true}).click();
+      assert.equal(await page.locator('#scope').textContent(), 'SHARED INJURY POLICY');
+      await page.getByLabel('Injury policy name', {exact: true}).fill('Normal injuries');
+      await page.getByLabel('Injury return preset', {exact: true}).selectOption('caster');
+      await page.getByLabel('Return at or below health percent', {exact: true}).fill('70');
+      await page.getByRole('button', {name: 'Apply injury return rule', exact: true}).click();
+      await saveDraft(page);
+      const normal = await api('read', {kind: 'injury_policies', name: 'Normal injuries'});
+      assert.match(normal.data.settings.wounded_eval, /health <= 70/);
+      await nav(page, 'Manage profiles');
+      const row = () => page.locator('.list-item').filter({has: page.getByText('Normal injuries', {exact: true})});
+      await row().getByRole('button', {name: 'Use as character default', exact: true}).click();
+      await page.waitForFunction(() => document.getElementById('status').textContent.includes('is the character injury default'));
+      assert.match(await row().innerText(), /CHARACTER DEFAULT/);
+      assert.equal(await row().getByRole('button', {name: 'Delete…', exact: true}).isDisabled(), true);
+      await api('save', {kind: 'injury_policies', name: 'Parasite injuries', revision: null,
+        data: {schema_version: 1, settings: {wounded_eval: 'Char.percent_health <= 50'}}});
+      await api('save', {kind: 'profiles', name: 'Policy hunt', revision: null, data: {schema_version: 1, settings: {targets: 'rat', hunting_commands: 'attack'}}});
+      await page.getByRole('button', {name: 'Refresh profile list', exact: true}).click();
+      await editNamed(page, 'Policy hunt');
+      await nav(page, 'Monitoring & limits');
+      const selector = page.getByLabel('Injury policy for this hunt', {exact: true});
+      assert.equal(await selector.inputValue(), 'character');
+      assert.match(await page.locator('#injury-policy-selection').innerText(), /Normal injuries \(character default\)/);
+      assert.equal(await page.locator('#injury-rule').count(), 0, 'Shared rules are not silently copied into an inline override');
+      await selector.selectOption('policy:Parasite injuries');
+      await page.waitForFunction(() => !document.querySelector('[aria-label="Injury policy for this hunt"]').disabled);
+      assert.match(await page.locator('#injury-policy-selection').innerText(), /Parasite injuries \(this hunt only\)/);
+      await saveDraft(page);
+      const overridden = await api('read', {kind: 'profiles', name: 'Policy hunt'});
+      assert.equal(overridden.data.injury_policy, 'Parasite injuries');
+      assert.equal(Object.hasOwn(overridden.data.settings, 'wounded_eval'), false);
+      assert.equal((await api('validate', {data: overridden.data})).effective.wounded_eval, 'Char.percent_health <= 50');
+      assert.equal((await api('validate', {data: {schema_version: 1, settings: {}}})).effective.wounded_eval, normal.data.settings.wounded_eval);
+      assert.deepEqual((await api('delete_preview', {kind: 'injury_policies', name: 'Parasite injuries'})).dependents, ['profiles/Policy hunt']);
+      await editNamed(page, 'Policy hunt'); await nav(page, 'Monitoring & limits');
+      await selector.selectOption('character');
+      await page.waitForFunction(() => !document.querySelector('[aria-label="Injury policy for this hunt"]').disabled);
+      await saveDraft(page);
+      assert.equal((await api('read', {kind: 'profiles', name: 'Policy hunt'})).data.injury_policy, null);
+      await editNamed(page, 'Normal injuries');
+      await page.getByLabel('Return at or below health percent', {exact: true}).fill('65');
+      await page.getByRole('button', {name: 'Apply injury return rule', exact: true}).click();
+      await saveDraft(page);
+      assert.match((await api('validate', {data: (await api('read', {kind: 'profiles', name: 'Policy hunt'})).data})).effective.wounded_eval, /health <= 65/);
+      await api('save', {kind: 'profiles', name: 'Old injury hunt', revision: null,
+        data: {schema_version: 1, settings: {wounded_eval: 'old_rule?'}}});
+      await nav(page, 'Manage profiles');
+      await page.getByRole('button', {name: 'Refresh profile list', exact: true}).click();
+      await editNamed(page, 'Old injury hunt'); await nav(page, 'Monitoring & limits');
+      assert.equal(await selector.inputValue(), 'custom');
+      assert.equal((await api('validate', {data: {wounded_eval: 'old_rule?'}})).effective.wounded_eval, 'old_rule?');
+      await selector.selectOption('character');
+      await page.waitForFunction(() => !document.querySelector('[aria-label="Injury policy for this hunt"]').disabled);
+      assert.equal(await page.locator('#injury-rule').count(), 0);
+      const optedIn = await rawDraft(page);
+      assert.equal(Object.hasOwn(optedIn.settings, 'wounded_eval'), false);
+      assert.equal(optedIn.injury_policy, null);
+    } finally {
+      const boot = await api('bootstrap');
+      if (boot.character_preferences.injury_policy) await api('set_character_injury_policy', {name: null, revision: boot.character_preferences.revision});
+    }
   });
 
   await check('society upkeep offers learned signs symbols and sigils without losing advanced entries', async (page) => {

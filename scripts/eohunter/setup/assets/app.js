@@ -338,7 +338,23 @@
     if (!fields.length) { main.append(note('No additional settings are described for this page by the installed engine. Unknown extension keys remain available in Raw configuration.')); return; }
     const isAdvanced = (field) => field.advanced ?? (field.editor === 'raw');
     const standard = fields.filter((f) => !isAdvanced(f)), advanced = fields.filter(isAdvanced);
-    if (standard.length) main.append(el('section', {class: 'card'}, el('div', {class: 'field-grid'}, standard.map(fieldControl))));
+    const groups = page === 'behavior' ? [
+      ['Movement and stance', 'How you stand, move, and wait between fights.', ['hunting_stance', 'wander_stance', 'sneaky_sneaky', 'wander_wait']],
+      ['Choosing fights', 'When to begin a fight and whether to switch targets.', ['priority', 'lone_targets_only', 'ignore_disks']],
+      ['Looting', 'What handles loot, when to collect it, and your stance while doing so.', ['loot_script', 'delay_loot', 'loot_stance', 'final_loot']],
+      ['When to leave a room', 'Crowd and environmental triggers for leaving the current room—not necessarily returning to rest.', ['flee_count', 'flee_clouds', 'flee_vines', 'flee_webs', 'flee_voids']]
+    ] : [];
+    const grouped = new Set();
+    for (const [title, description, keys] of groups) {
+      const members = keys.map((key) => standard.find((field) => field.key === key)).filter(Boolean);
+      if (!members.length) continue;
+      members.forEach((field) => grouped.add(field.key));
+      main.append(el('section', {class: 'card', 'aria-label': title}, el('h2', {}, title), el('p', {class: 'help'}, description),
+        el('div', {class: 'field-grid'}, members.map(fieldControl))));
+    }
+    const remaining = standard.filter((field) => !grouped.has(field.key));
+    if (remaining.length) main.append(el('section', {class: 'card'}, groups.length ? el('h2', {}, 'Other hunting settings') : null,
+      el('div', {class: 'field-grid'}, remaining.map(fieldControl))));
     if (advanced.length) main.append(el('details', {class: 'card'}, el('summary', {}, `Advanced settings (${advanced.length})`), el('div', {class: 'field-grid'}, advanced.map(fieldControl))));
   }
   function orderedList(field, raw, disabled) {

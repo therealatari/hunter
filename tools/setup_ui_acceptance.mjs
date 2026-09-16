@@ -175,6 +175,35 @@ try {
     assert.equal(Object.hasOwn(draft.settings, 'box_in_hand'), false, 'Viewing categories must not change settings');
   });
 
+  await check('hunting behavior groups related controls without duplicates or hidden normal settings', async (page) => {
+    await editNamed(page, 'Fixture hunt');
+    const before = await rawDraft(page);
+    await page.locator('#navigation').getByRole('button', {name: 'Hunting behavior', exact: true}).click();
+    const groups = {
+      'Movement and stance': ['hunting_stance', 'wander_stance', 'sneaky_sneaky', 'wander_wait'],
+      'Choosing fights': ['priority', 'lone_targets_only', 'ignore_disks'],
+      'Looting': ['loot_script', 'delay_loot', 'loot_stance', 'final_loot'],
+      'When to leave a room': ['flee_count', 'flee_clouds', 'flee_vines', 'flee_webs', 'flee_voids']
+    };
+    for (const [name, keys] of Object.entries(groups)) {
+      const section = page.getByRole('region', {name, exact: true});
+      await section.getByRole('heading', {name, exact: true}).waitFor();
+      for (const key of keys) {
+        assert.equal(await section.locator(`#field-${key}`).isVisible(), true);
+        assert.equal(await page.locator(`#field-${key}`).count(), 1);
+      }
+    }
+    if (process.env.SETUP_SCREENSHOTS) await page.screenshot({path: `${process.env.SETUP_SCREENSHOTS}/hunting-groups.png`});
+    await page.setViewportSize({width: 390, height: 844});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    assert.equal(await page.locator('#field-flee_count').isVisible(), true);
+    await page.setViewportSize({width: 1400, height: 1000});
+    await page.locator('#search').fill('flee_message');
+    await page.locator('#search-results').getByRole('button').click();
+    assert.equal(await page.locator('#field-flee_message').isVisible(), true, 'Search still reveals advanced fields');
+    assert.deepEqual(await rawDraft(page), before, 'Grouping and browsing must not change the draft');
+  });
+
   await check('guided gaps: boon choices preserve extensions and round-trip through save', async (page) => {
     await api('save', {kind: 'profiles', name: 'Boon panel test', revision: null, data: {
       schema_version: 1, settings: {...original.data.settings, boons_ignore: ['future_boon', 'dispelling'], boons_flee: ['another_extension']}

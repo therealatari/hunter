@@ -56,7 +56,10 @@ Choose **Create with guidance** for five chapters:
 **Advanced editor** switches to the full section list without copying or
 resetting the draft. Search also takes you to the full editor when necessary.
 Within Hunting behavior, everyday looting, target-priority and hazard choices
-are visible normally. The custom flee-message pattern and obsolete box-in-hand
+are visible in four named groups: Movement and stance, Choosing fights,
+Looting, and When to leave a room. These sections are open by default; their
+short descriptions distinguish room fleeing from returning to rest.
+The custom flee-message pattern and obsolete box-in-hand
 compatibility flag stay under Advanced settings even though they have help text.
 Shared defaults and plans can be created from **Reusable settings & current
 draft** on the profiles page. Plans open their command editor, not JSON.

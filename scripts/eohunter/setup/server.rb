@@ -13,7 +13,7 @@ module EO
       # Maximum JSON request bytes before a configuration request is refused.
       MAX_BODY = 1_048_576
       # The complete static resource allowlist; arbitrary file reads are absent.
-      TYPES = { 'index.html' => 'text/html', 'routine-editor.js' => 'text/javascript', 'injury-editor.js' => 'text/javascript', 'app.js' => 'text/javascript', 'style.css' => 'text/css' }.freeze
+      TYPES = { 'index.html' => 'text/html', 'routine-editor.js' => 'text/javascript', 'injury-editor.js' => 'text/javascript', 'settings-editor.js' => 'text/javascript', 'app.js' => 'text/javascript', 'style.css' => 'text/css' }.freeze
 
       # Prepare a loopback listener and a fresh browser-session token.
       # @param app [App] injected configuration operations

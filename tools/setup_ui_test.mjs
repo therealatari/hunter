@@ -47,7 +47,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(result)); return;
   }
   const filename = req.url === '/' ? 'index.html' : req.url.slice(1);
-  if (!['index.html', 'routine-editor.js', 'injury-editor.js', 'app.js', 'style.css'].includes(filename)) {res.writeHead(404); res.end(); return;}
+  if (!['index.html', 'routine-editor.js', 'injury-editor.js', 'settings-editor.js', 'app.js', 'style.css'].includes(filename)) {res.writeHead(404); res.end(); return;}
   res.writeHead(200, {'Content-Type': filename.endsWith('.js') ? 'application/javascript' : filename.endsWith('.css') ? 'text/css' : 'text/html'});
   res.end(await readFile(new URL(filename, assets)));
 });

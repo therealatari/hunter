@@ -13,7 +13,7 @@ RSpec.describe EOHunter::SetupBuild do
     expect { RubyVM::InstructionSequence.compile(result.source) }.not_to raise_error
     expect(result.source).not_to include('remove_const, :Engine')
     expect(result.source).not_to match(/^require_relative /)
-    expect(result.source).to include('ASSETS = ', 'index.html', 'routine-editor.js', 'app.js', 'style.css')
+    expect(result.source).to include('ASSETS = ', 'index.html', 'routine-editor.js', 'settings-editor.js', 'app.js', 'style.css')
   end
 
   it 'keeps policy dependency order aligned with the engine distribution' do

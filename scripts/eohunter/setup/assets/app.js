@@ -46,6 +46,10 @@
     ['combat', 'Combat approach', 'Usual sequence & exceptions'], ['rest', 'Rest & recovery', 'When to return and recover'],
     ['review', 'Review & save', 'Check the whole plan']
   ];
+  const combatOptions = ['tier3', 'aim', 'uac_smite', 'uac_mstrike', 'mstrike_mob', 'mstrike_cooldown', 'mstrike_quickstrike', 'mstrike_stamina_cooldown', 'mstrike_stamina_quickstrike'];
+  const wandOptions = ['wand', 'fresh_wand_container', 'dead_wand_container', 'wand_if_oom'];
+  const orderedFields = new Set(['resting_commands', 'resting_scripts', 'hunting_prep_commands', 'hunting_scripts',
+    'field_rest_commands', 'field_rest_scripts', 'field_hunting_prep_commands', 'custom_fog']);
   function el(tag, attributes = {}, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attributes)) {
@@ -59,6 +63,12 @@
     return node;
   }
   function button(label, click, css = '') { return el('button', {type: 'button', class: css, onclick: click}, label); }
+  function detailsPanel(key, title, ...children) {
+    state.panels ||= {};
+    const panel = el('details', {class: 'card', ...(state.panels[key] ? {open: ''} : {})}, el('summary', {}, title), ...children);
+    panel.addEventListener('toggle', () => { if (panel.isConnected) state.panels[key] = panel.open; });
+    return panel;
+  }
   function note(message, style = '') { return el('div', {class: `notice ${style}`}, message); }
   function status(message, error = false) { $('status').textContent = message; $('status').className = error ? 'error' : ''; }
   function fail(error) { status(error.message || String(error), true); }
@@ -164,11 +174,13 @@
     else if (state.kind === 'plan') renderPlanCommands(main);
     else if (state.guided && state.page === 'character') renderCharacter(main);
     else {
-      if (state.page === 'area') renderArea(main);
+      if (state.page === 'area') { renderArea(main); renderBoons(main); }
       if (state.page === 'combat') renderCombat(main);
+      if (state.page === 'equipment') main.append(fieldSection('Wands and spell fallback', wandOptions));
+      if (state.page === 'rest') renderReturnOptions(main);
       if (state.page === 'buffs') renderBuffs(main);
       if (state.page === 'monitoring') renderInjuryRule(main);
-      if (state.page === 'team') main.append(note('Saving a hunt does not enroll another character, approve a leader, or enable participation. Use each member’s local participation setup.'));
+      if (state.page === 'team') renderTeam(main);
       if (['group', 'team'].includes(state.page)) main.append(modeControl());
       if (state.guided) renderGuidedFields(main, state.page);
       else renderFields(main, state.page);
@@ -243,6 +255,7 @@
   }
   function renderCharacter(main) {
     main.append(el('section', {class: 'card'}, el('h2', {}, `A hunt for ${state.boot.context?.character || 'this character'}`), nameControl(), referenceSelect('defaults', 'Start from my saved character defaults', state.boot.defaults)));
+    renderNotes(main);
     const context = el('select', {'aria-label': 'How will you hunt?'}, [['solo', 'Solo Hunt'], ['group', 'Group Hunt'], ['team', 'Multi-Account Team']].map(([value, label]) => el('option', {value}, label)));
     context.value = state.playContext;
     context.addEventListener('change', () => { state.playContext = context.value; if (context.value === 'solo') state.mode = 'solo'; changed(); render(); });
@@ -263,8 +276,11 @@
         fieldSection('When should you return?', ['fried', 'oom', 'encumbered']),
         fieldSection('What happens at rest?', ['resting_scripts', 'resting_commands']),
         fieldSection('When should hunting resume?', ['rest_till_exp', 'rest_till_mana']));
-      const details = el('details', {class: 'card'}, el('summary', {}, 'More recovery options'));
-      details.append(el('p', {class: 'help'}, 'Buff monitoring, emergency responses and different field-rest services are in the advanced editor. Switching views keeps this draft.'), button('Recovery & emergencies', () => navigate('recovery')), button('Buffs', () => navigate('buffs')));
+      const details = detailsPanel('more-recovery', 'More recovery options');
+      details.append(fieldSection('Preparation before departure', ['hunting_prep_commands', 'hunting_scripts']),
+        fieldSection('Nearby field-rest services (solo only)', ['field_rest_for', 'field_rest_commands', 'field_rest_scripts', 'field_hunting_prep_commands', 'field_rest_timeout_seconds', 'after_town_rest']),
+        fieldSection('Additional departure requirements', ['rest_till_spirit', 'rest_till_percentstamina']),
+        el('p', {class: 'help'}, 'Emergency responses and missing-buff policies remain in their own settings pages.'), button('Recovery & emergencies', () => navigate('recovery')), button('Buffs', () => navigate('buffs')));
       main.append(details);
     }
   }
@@ -304,18 +320,96 @@
     const provenance = state.validation?.provenance?.[key];
     const source = el('span', {class: 'source'}, local ? 'Explicit setting in this draft' : state.resolving ? 'Resolving inherited value…' : provenance ? `From ${typeof provenance === 'string' ? provenance : pretty(provenance)}` : state.draft.defaults ? 'Inherited; use Review to resolve the selected character defaults' : 'Engine / compatibility default');
     card.append(input, error, el('p', {id: `help-${key}`, class: 'help'}, field.help || 'Stored using the existing Hunter setting semantics.', field.units ? ` Units: ${field.units}.` : ''), source);
+    if (orderedFields.has(key)) {
+      const raw = el('details', {}, el('summary', {}, 'Original list (advanced)'), input);
+      card.prepend(orderedList(field, value, input.disabled));
+      card.append(raw);
+    }
     if (['resting_room_id', 'field_rest_room_id'].includes(key) && !input.disabled) card.append(restMapButton(key));
     card.append(el('details', {}, el('summary', {}, 'Setting details'), el('p', {}, el('code', {}, key)), el('p', {}, `Default: ${pretty(field.default) ?? 'not set'}. Scope: ${field.scope || 'this saved configuration'}.`), field.requires ? el('p', {}, `Requires: ${String(field.requires)}`) : null, field.available === false ? el('p', {}, field.unavailable_reason || 'Unavailable in the installed engine.') : null));
     if (local) card.append(button('Use default again', () => { delete state.draft.settings[key]; state.invalid.delete(key); changed(); resolveInheritance(); }, 'reset'));
     return card;
   }
   function renderFields(main, page) {
-    const fields = state.boot.fields.filter((f) => normalizedPage(f.page) === page && !(page === 'buffs' && f.key === 'signs') && !(page === 'monitoring' && f.key === 'wounded_eval'));
+    const handled = {area: ['boons_ignore', 'boons_flee'], rest: ['fog_return', 'fog_optional', 'fog_rift', 'custom_fog', 'return_waypoint_ids', 'rallypoint_room_ids'],
+      combat: [...combatOptions, 'hunting_commands', 'quick_commands', 'disable_commands'], equipment: wandOptions,
+      team: ['group_members', 'group_fried_trigger', 'group_strict_movement', 'independent_travel', 'independent_return', 'group_deader', 'ma_looter', 'never_loot', 'random_loot', 'quiet_followers']};
+    const fields = state.boot.fields.filter((f) => normalizedPage(f.page) === page && !handled[page]?.includes(f.key) && !(page === 'buffs' && f.key === 'signs') && !(page === 'monitoring' && f.key === 'wounded_eval'));
     if (!fields.length) { main.append(note('No additional settings are described for this page by the installed engine. Unknown extension keys remain available in Raw configuration.')); return; }
     const isAdvanced = (field) => field.advanced || field.editor === 'raw';
     const standard = fields.filter((f) => !isAdvanced(f)), advanced = fields.filter(isAdvanced);
     if (standard.length) main.append(el('section', {class: 'card'}, el('div', {class: 'field-grid'}, standard.map(fieldControl))));
     if (advanced.length) main.append(el('details', {class: 'card'}, el('summary', {}, `Advanced settings (${advanced.length})`), el('div', {class: 'field-grid'}, advanced.map(fieldControl))));
+  }
+  function orderedList(field, raw, disabled) {
+    const codec = globalThis.HunterSettingsEditor, values = codec.lines(raw);
+    const box = el('div', {class: 'ordered-settings', 'aria-label': `${field.label} sequence`});
+    box.append(el('p', {class: 'help'}, field.key.endsWith('_scripts') ? 'Add script names with arguments, without a leading semicolon or “script”. Resting services are ordered; active hunting scripts run during the hunting phase.' : 'One preparation command per row. To call a script from a command list, use “script name”. These lists do not use combat conditions.'));
+    if (!values) { box.append(note('Structured imported entries are preserved. Use Raw configuration to edit them.')); return box; }
+    const error = el('p', {class: 'error-text', role: 'status'});
+    const commit = (next) => {
+      try { set(field.key, codec.replaceLines(raw, next)); render(); }
+      catch (failure) { error.textContent = failure.message; }
+    };
+    values.forEach((value, index) => {
+      const edit = el('input', {value, 'aria-label': `${field.label} step ${index + 1}`, disabled, title: field.help});
+      const update = button('Update', () => commit(values.map((entry, i) => i === index ? edit.value : entry)));
+      const up = button('Move up', () => { const next = values.slice(); [next[index - 1], next[index]] = [next[index], next[index - 1]]; commit(next); });
+      const down = button('Move down', () => { const next = values.slice(); [next[index + 1], next[index]] = [next[index], next[index + 1]]; commit(next); });
+      const remove = button('Remove', () => commit(values.filter((_, i) => i !== index)));
+      update.disabled = remove.disabled = disabled; up.disabled = disabled || index === 0; down.disabled = disabled || index === values.length - 1;
+      box.append(el('div', {class: 'list-item'}, edit, update, up, down, remove));
+    });
+    const next = el('input', {'aria-label': `New ${field.label} entry`, placeholder: field.key.endsWith('_scripts') ? 'e.g. eherbs' : 'e.g. stance defensive', disabled});
+    const add = button('Add entry', () => commit([...values, next.value])); add.disabled = disabled;
+    box.append(el('div', {class: 'row'}, next, add), error);
+    return box;
+  }
+  function renderNotes(main) {
+    const value = state.draft.notes ?? state.draft.settings?.notes ?? '';
+    if (typeof value !== 'string') { main.append(note('Imported structured notes are preserved in Raw configuration.')); return; }
+    const input = el('textarea', {'aria-label': 'Profile notes', title: 'Personal setup notes. These do not change hunting behavior.'}, value);
+    input.addEventListener('change', () => { state.draft.notes = input.value; changed(); });
+    main.append(el('section', {class: 'card'}, el('h2', {}, 'Profile notes'), input, el('p', {class: 'help'}, 'Reminders about this setup. Saved as editor metadata, not hunting instructions.')));
+  }
+  function renderReturnOptions(main) {
+    main.append(fieldSection('How to return to rest', ['fog_return', 'fog_optional', 'fog_rift', 'return_waypoint_ids', 'rallypoint_room_ids']));
+    main.append(el('details', {class: 'card', ...(String(effective('fog_return')) === '6' ? {open: ''} : {})}, el('summary', {}, 'Custom return sequence (used only with Custom return commands)'),
+      fieldSection('Custom return commands', ['custom_fog'])));
+  }
+  function renderTeam(main) {
+    main.append(note('This configures one character. Every follower still needs a local profile and explicit receiver approval. Saving does not enroll anyone or start the group.'),
+      fieldSection('Members and readiness', ['group_members', 'group_strict_movement', 'group_deader']),
+      fieldSection('Travel together or independently', ['independent_travel', 'independent_return']),
+      fieldSection('When the team rests', ['group_fried_trigger', 'quiet_followers']),
+      fieldSection('Who handles loot?', ['ma_looter', 'random_loot', 'never_loot']));
+  }
+  function renderBoons(main) {
+    const codec = globalThis.HunterSettingsEditor, abilities = state.boot.boon_abilities || [];
+    const panel = el('details', {class: 'card', id: 'boon-editor'}, el('summary', {}, 'Boon creatures: fight, ignore or flee'));
+    panel.append(el('p', {class: 'help'}, 'Only boons recognized by the installed engine are listed. Fight follows your normal target rules; Ignore does not stop incoming attacks. Flee takes precedence when a creature has multiple boons.'));
+    const error = el('p', {class: 'error-text', role: 'status'});
+    const apply = (keys, choice) => {
+      try { const next = codec.setBoons(effective('boons_ignore'), effective('boons_flee'), keys, choice); Object.assign(state.draft.settings, next); changed(); render(); $('boon-editor').open = true; }
+      catch (failure) { error.textContent = failure.message; }
+    };
+    if (!abilities.length) panel.append(note('The installed boon table is unavailable. Existing values remain editable below.'));
+    else {
+      const bulk = el('div', {class: 'actions'});
+      for (const [value, label] of [['fight', 'Fight'], ['ignore', 'Ignore'], ['flee', 'Flee']]) {
+        const control = button(`${label} all listed boons`, () => apply(abilities.map((entry) => entry.key), value)); control.disabled = state.resolving; bulk.append(control);
+      }
+      panel.append(bulk);
+      for (const ability of abilities) {
+        const select = el('select', {'aria-label': `Response to ${ability.label}`, disabled: state.resolving, title: `Recognized adjectives: ${ability.adjectives.join(', ')}`},
+          [['fight', 'Fight using normal target rules'], ['ignore', 'Do not target'], ['flee', 'Leave the room']].map(([value, label]) => el('option', {value}, label)));
+        select.value = codec.boonChoice(effective('boons_ignore'), effective('boons_flee'), ability.key);
+        select.addEventListener('change', () => apply([ability.key], select.value));
+        panel.append(el('div', {class: 'field'}, el('label', {}, el('span', {class: 'control-label'}, ability.label), select), el('p', {class: 'help'}, `Recognized adjectives: ${ability.adjectives.join(', ')}`)));
+      }
+    }
+    panel.append(error, el('details', {}, el('summary', {}, 'Original boon lists and extension names'), fieldSection('Native boon lists', ['boons_ignore', 'boons_flee'])));
+    main.append(panel);
   }
   function renderInjuryRule(main) {
     const codec = window.HunterInjuryEditor, field = state.boot.fields.find((field) => field.key === 'wounded_eval');
@@ -450,7 +544,7 @@
       el('p', {class: 'help'}, 'Saved sequences are reusable Combat Plans. Selecting one changes only this draft until you save the hunt. Editing a shared plan affects linked hunts on their next launch.'));
     main.append(library);
     if (state.sequenceDraft) renderSequenceDraft(main);
-    else if (state.guided || state.draft.combat_plan) {
+    else {
       if (state.resolving) main.append(note('Resolving your saved combat settings…'));
       else if (state.draft.combat_plan) main.append(el('section', {class: 'card', id: 'selected-combat-sequence'},
         el('h2', {}, `Selected sequence: ${state.draft.combat_plan}`),
@@ -462,6 +556,18 @@
       }
     }
     renderCreatureSequences(main);
+    const styles = detailsPanel('combat-specialties', 'Unarmed combat and MSTRIKE');
+    styles.append(fieldSection('Automatic unarmed attacks', ['tier3', 'aim', 'uac_smite', 'uac_mstrike']),
+      fieldSection('MSTRIKE resources and targets', combatOptions.filter((key) => key.startsWith('mstrike_'))));
+    const alternatives = detailsPanel('alternative-sequences', 'Alternative combat sequences');
+    alternatives.addEventListener('toggle', () => {
+      if (!alternatives.open || alternatives.dataset.loaded) return;
+      alternatives.dataset.loaded = 'true';
+      alternatives.append(sequenceEditor('When my mind is full (coordinated groups)', effective('disable_commands'), (value) => set('disable_commands', value)),
+        sequenceEditor('Quick-target combat sequence', effective('quick_commands'), (value) => set('quick_commands', value)));
+    });
+    main.append(styles, alternatives);
+    if (state.guided) main.append(el('details', {class: 'card'}, el('summary', {}, 'Wands and spell fallback'), fieldSection('Wand settings', wandOptions)));
     if (state.guided) {
       const settings = el('details', {class: 'card', id: 'combat-style-settings'}, el('summary', {}, 'Weapons, aiming, stealth & automatic stances'));
       settings.append(el('p', {class: 'help'}, 'These settings belong to this hunt, not to an individual shared sequence. They configure Hunter’s existing behaviour; changing a sequence does not silently change equipment or movement.'),
@@ -615,7 +721,7 @@
       // Keep an imported numeric stance visible without rewriting it.
       if (model[key] && !choices.some(([value]) => value === model[key])) choices = [...choices, [model[key], `Existing: ${model[key]}`]];
       const select = el('select', {'aria-label': adding ? label : `Step ${label.toLowerCase()}`}, choices.map(([value, text]) => el('option', {value}, text)));
-      select.value = model[key]; select.addEventListener('change', () => { model[key] = select.value; });
+      select.value = String(model[key]); select.addEventListener('change', () => { model[key] = choices.find(([value]) => String(value) === select.value)?.[0] ?? select.value; });
       fields.append(el('label', {class: 'field'}, label, select));
     };
     const input = (key, label, placeholder = '', numeric = false) => {
@@ -627,6 +733,32 @@
       fields.replaceChildren(); error.textContent = '';
       help.textContent = codec.actionHelp[model.kind] || 'Uses the native targeted combat action. Hunting stance and native safety gates still apply.';
       switch (model.kind) {
+        case 'mstrike': options('move', 'MSTRIKE variant', [['', 'Weapon attack'], ...['jab', 'punch', 'kick', 'grapple'].map((value) => [value, value])]); break;
+        case 'wandolier':
+          options('stance', 'Wand stance', codec.stances.map((value) => [value, value]));
+          options('noreserve', 'Reserve the retrieved wand', [[false, 'Use native reservation'], [true, 'Do not reserve']]); break;
+        case 'jewel': input('mnemonic', 'Gemstone ability mnemonic', 'e.g. arcaneintensity'); break;
+        case 'curse': options('variant', 'Curse type', ['clumsy', 'weakness', 'darkness', 'itch', 'hex', 'pox', 'nightmare', 'star'].map((value) => [value, value])); break;
+        case 'efury': options('element', 'Earthen Fury element', [['', 'Default'], ['fire', 'Fire'], ['cold', 'Cold']]); break;
+        case 'tether': options('recast', 'Recast when tether transfers', [[false, 'No'], [true, 'Use native recast handling']]); break;
+        case 'caststop': case 'unravel': input('spell', 'Spell number', model.kind === 'unravel' ? 'Optional spell to unravel' : 'Required', true); break;
+        case 'resonance': input('spells', 'Rotation spell numbers', '511 512 513'); break;
+        case 'store': options('hand', 'Hands to stow', [['left', 'Left'], ['right', 'Right'], ['both', 'Both']]); break;
+        case 'wield': input('noun', 'Item noun', 'staff'); options('hand', 'Destination hand', [['left', 'Left'], ['right', 'Right']]); break;
+        case 'script': input('script', 'Script name and arguments', 'my-combat-script'); break;
+        case 'force': case 'eachtarget': case 'prefix': {
+          if (model.kind === 'force') input('endroll', 'Required endroll', '101', true);
+          if (model.kind === 'prefix') options('prefix', 'Buff before action', [['haste', 'Haste (506)'], ['slayer', 'Spirit Slayer (240)'], ['tonis', 'Song of Tonis (1035)']]);
+          const current = el('code', {}, model.inner);
+          const chooser = el('details', {}, el('summary', {}, 'Choose the inner action'), current);
+          chooser.addEventListener('toggle', () => {
+            if (!chooser.open || chooser.dataset.loaded) return;
+            chooser.dataset.loaded = 'true';
+            chooser.append(actionBuilder(model.inner, (command) => { model.inner = command; current.textContent = command; chooser.open = false; }, false));
+          });
+          fields.append(chooser, el('p', {class: 'help'}, 'Choose and update the inner action, then add/update this outer step. Conditions apply to the outer step.'));
+          break;
+        }
         case 'incant':
           input('spell', 'Spell number', 'e.g. 711', true);
           options('delivery', 'Spell delivery', [['incant', 'Incant'], ['default', 'Lich spell default'], ['cast', 'Cast'], ['channel', 'Channel'], ['evoke', 'Evoke']]);
@@ -1627,6 +1759,7 @@
     try {
       if (!token) throw new Error('The setup session token is missing. Open the complete setup URL printed by ;eohunter-setup.');
       state.boot = await api('bootstrap');
+      globalThis.HunterRoutineEditor.registerBuffConditions(state.boot.routine_buff_conditions);
       for (const key of ['fields', 'profiles', 'legacy_profiles', 'defaults', 'plans']) state.boot[key] ||= [];
       $('context').textContent = `${state.boot.context?.character || 'Character'} / ${state.boot.context?.game || 'Game'}`;
       render(); status('Connected. Changes stay in this draft until you save.');

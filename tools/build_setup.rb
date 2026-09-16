@@ -33,7 +33,7 @@ module EOHunter
         source = Build.setup_source(Build.strip_pragma(Build.read(root, "scripts/eohunter/setup/#{part}.rb")), "setup/#{part}")
         Build.append_marked(lines, map, "eohunter/setup/#{part}.rb", source)
       end
-      assets = %w[index.html routine-editor.js injury-editor.js app.js style.css].to_h do |name|
+      assets = %w[index.html routine-editor.js injury-editor.js settings-editor.js app.js style.css].to_h do |name|
         [name, Build.read(root, "scripts/eohunter/setup/assets/#{name}")]
       end
       lines << "module ::EO::HunterSetup\n  ASSETS = #{assets.inspect}.freeze unless const_defined?(:ASSETS, false)\nend\n"

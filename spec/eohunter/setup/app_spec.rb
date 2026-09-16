@@ -10,7 +10,7 @@ RSpec.describe EO::HunterSetup::App do
   around { |example| Dir.mktmpdir('hunter-setup-app') { |dir| @dir = dir; example.run } }
   let(:store) { EO::HunterSetup::Store.new(root: File.join(@dir, 'eohunter'), legacy_root: File.join(@dir, 'legacy')) }
   let(:schema) do
-    double(fields: [{ 'key' => 'fried', 'label' => 'Mind threshold' }], capabilities: {}, routine_maneuvers: [],
+    double(fields: [{ 'key' => 'fried', 'label' => 'Mind threshold' }], capabilities: {}, routine_maneuvers: [], boon_abilities: [], routine_buff_conditions: [],
            validate: { 'errors' => [], 'missing' => [], 'warnings' => [], 'ready' => true, 'valid' => true })
   end
   let(:app) { described_class.new(store: store, schema: schema, context: { character: 'Fixture', game: 'TEST' }) }

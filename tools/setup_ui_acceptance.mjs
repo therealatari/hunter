@@ -162,6 +162,113 @@ try {
     assert.deepEqual(draft.settings.custom_extension, {keep_me: false});
   });
 
+  await check('guided gaps: boon choices preserve extensions and round-trip through save', async (page) => {
+    await api('save', {kind: 'profiles', name: 'Boon panel test', revision: null, data: {
+      schema_version: 1, settings: {...original.data.settings, boons_ignore: ['future_boon', 'dispelling'], boons_flee: ['another_extension']}
+    }});
+    await page.goto('about:blank');
+    await page.goto(url);
+    await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Connected.'));
+    await editNamed(page, 'Boon panel test');
+    await page.locator('#boon-editor > summary').click();
+    const choice = page.getByLabel('Response to Dispelling', {exact: true});
+    assert.equal(await choice.inputValue(), 'ignore');
+    await choice.selectOption('flee');
+    if (process.env.SETUP_SCREENSHOTS) await page.screenshot({path: `${process.env.SETUP_SCREENSHOTS}/boon-panel.png`});
+    await page.getByRole('button', {name: 'Fight all listed boons', exact: true}).click();
+    await choice.selectOption('flee');
+    const draft = await rawDraft(page);
+    assert.deepEqual(draft.settings.boons_ignore, ['future_boon']);
+    assert.deepEqual(draft.settings.boons_flee, ['another_extension', 'dispelling']);
+    await saveDraft(page);
+    await editNamed(page, 'Boon panel test');
+    await page.locator('#boon-editor > summary').click();
+    assert.equal(await choice.inputValue(), 'flee');
+  });
+
+  await check('guided gaps: named fog options and ordered services save native values', async (page) => {
+    await editNamed(page, 'Other hunt');
+    await nav(page, 'Rest & services');
+    await page.getByLabel('Return method', {exact: true}).selectOption({label: 'Sigil of Escape'});
+    const services = page.getByLabel('Services at rest sequence', {exact: true});
+    await services.getByLabel('New Services at rest entry', {exact: true}).fill('eloot sell');
+    await services.getByRole('button', {name: 'Add entry', exact: true}).click();
+    await services.getByLabel('New Services at rest entry', {exact: true}).fill('eherbs');
+    await services.getByRole('button', {name: 'Add entry', exact: true}).click();
+    await services.locator('.list-item').last().getByRole('button', {name: 'Move up', exact: true}).click();
+    const draft = await rawDraft(page);
+    assert.equal(draft.settings.fog_return, '4');
+    assert.deepEqual(draft.settings.resting_scripts, ['eherbs', 'eloot sell']);
+    await saveDraft(page);
+    await editNamed(page, 'Other hunt');
+    assert.deepEqual((await rawDraft(page)).settings.resting_scripts, ['eherbs', 'eloot sell']);
+  });
+
+  await check('guided gaps: combat specialty options and boolean action choices remain exact', async (page) => {
+    await api('save', {kind: 'profiles', name: 'Special actions test', revision: null, data: {schema_version: 1, settings: {...original.data.settings, hunting_commands: ''}}});
+    await page.goto('about:blank');
+    await page.goto(url);
+    await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Connected.'));
+    await editNamed(page, 'Special actions test');
+    await nav(page, 'Combat Plans');
+    const editor = page.locator('section.card').filter({has: page.getByRole('heading', {name: 'Usual combat sequence', exact: true})});
+    const add = editor.locator(':scope > .action-builder');
+    await add.getByLabel('Action to add', {exact: true}).selectOption('tether');
+    await add.getByLabel('Recast when tether transfers').selectOption('true');
+    await add.getByLabel('Recast when tether transfers').selectOption('false');
+    await add.getByRole('button', {name: 'Add action', exact: true}).click();
+    await add.getByLabel('Action to add', {exact: true}).selectOption('curse');
+    await add.getByLabel('Curse type').selectOption('nightmare');
+    await add.getByRole('button', {name: 'Add action', exact: true}).click();
+    await add.getByLabel('Action to add', {exact: true}).selectOption('force');
+    await add.getByLabel('Required endroll').fill('120');
+    await add.getByText('Choose the inner action', {exact: true}).click();
+    const inner = add.locator('details > .action-builder');
+    await inner.getByLabel('Action type', {exact: true}).selectOption('incant');
+    await inner.getByLabel('Step spell number', {exact: true}).fill('1002');
+    await inner.getByRole('button', {name: 'Update action', exact: true}).click();
+    await add.getByRole('button', {name: 'Add action', exact: true}).click();
+    await page.getByText('Unarmed combat and MSTRIKE', {exact: true}).click();
+    await page.getByLabel('Attack at excellent UAC positioning', {exact: true}).selectOption('kick');
+    await page.getByLabel('Disable automatic unarmed MSTRIKE', {exact: true}).selectOption('true');
+    if (process.env.SETUP_SCREENSHOTS) await page.screenshot({path: `${process.env.SETUP_SCREENSHOTS}/combat-specialties.png`});
+    const draft = await rawDraft(page);
+    assert.equal(draft.settings.hunting_commands, 'tether, curse nightmare, force incant 1002 until 120');
+    assert.equal(draft.settings.tier3, 'kick');
+    assert.equal(draft.settings.uac_mstrike, true);
+    await saveDraft(page);
+  });
+
+  await check('guided gaps: alternative sequence stays open after editing without changing the usual sequence', async (page) => {
+    await editNamed(page, 'Sequence choices');
+    await nav(page, 'Combat Plans');
+    await page.getByText('Alternative combat sequences', {exact: true}).click();
+    const alternative = page.locator('section.card').filter({has: page.getByRole('heading', {name: 'When my mind is full (coordinated groups)', exact: true})});
+    await alternative.getByRole('button', {name: 'Add action', exact: true}).click();
+    await alternative.getByRole('button', {name: 'Add action', exact: true}).click();
+    assert.equal(await alternative.getByLabel('Original combat routine').inputValue(), 'attack, attack');
+    const draft = await rawDraft(page);
+    assert.equal(draft.settings.disable_commands, 'attack, attack');
+    assert.equal(draft.settings.hunting_commands, 'attack');
+  });
+
+  await check('guided gaps: notes are editor metadata and team settings do not enroll anyone', async (page) => {
+    await editNamed(page, 'Other hunt');
+    await page.getByRole('button', {name: 'Guided setup', exact: true}).click();
+    await page.locator('#navigation').getByRole('button').filter({hasText: 'Your character'}).click();
+    await page.getByLabel('Profile notes', {exact: true}).fill('Use cold spells here.');
+    await page.getByLabel('Profile notes', {exact: true}).press('Tab');
+    await nav(page, 'Multi-Account Team');
+    await page.getByLabel('Required multi-account followers', {exact: true}).fill('TestFollower');
+    await page.getByLabel('Required multi-account followers', {exact: true}).press('Tab');
+    const draft = await rawDraft(page);
+    assert.equal(draft.notes, 'Use cold spells here.');
+    assert.equal(draft.settings.group_members, 'TestFollower');
+    assert.equal(draft.settings.notes, undefined);
+    await saveDraft(page);
+    assert.equal((await api('read', {kind: 'profiles', name: 'Other hunt'})).data.notes, 'Use cold spells here.');
+  });
+
   await check('inherited values survive an unrelated edit', async (page) => {
     await editNamed(page, 'Other hunt');
     await nav(page, 'Combat Plans');

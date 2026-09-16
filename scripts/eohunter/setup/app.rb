@@ -81,6 +81,8 @@ module EO
           recovery_fallback: @recovery_fallback,
           capabilities: @schema.capabilities,
           routine_maneuvers: @schema.routine_maneuvers,
+          boon_abilities: @schema.boon_abilities,
+          routine_buff_conditions: @schema.routine_buff_conditions,
           society_abilities: @society_abilities,
           notice: 'Saves only EOHunter files. Area suggestions are not field-verified. Saving does not start a hunt.'
         }

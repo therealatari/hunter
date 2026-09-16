@@ -16,7 +16,9 @@ not a claim that every proposed workflow is complete. No production profiles
 were changed and no game commands were sent during implementation. An initial
 standalone editor was installed for user feedback; the installed custom hunter
 was deliberately retained because it includes local group functionality absent
-from this branch. Nothing has been committed or pushed as part of this work.
+from this branch. That describes the initial prototype stage; later integration
+is published as draft PR #117. The verification entries below distinguish
+local follow-ups from installed builds.
 
 ## Implemented
 
@@ -92,6 +94,27 @@ Fresh-session GUI and bounded live MA smoke testing remain outstanding.
 Those locally installed bundles were built from an uncommitted integration;
 their base SHA alone does not identify the combined source. The local deployment
 record, not included in this repository, retains the artifact hashes.
+
+## September 16 guided feature-gap follow-up (local, not deployed)
+
+Added guided controls over existing runtime settings: native boon responses,
+UAC/MSTRIKE and wand fallback, named return methods, ordered preparation/rest
+lists, alternative combat sequences, specialized action builders and named-buff
+conditions. Team settings are grouped by purpose and notes are editor metadata.
+Imported custom values remain available without silently rewriting them.
+See the [coverage and limitations](guides/setup.md#guided-configuration-coverage-update).
+
+Verification: **1,427 Ruby examples, zero failures, one Windows-only pending**;
+**42/42 offline real-backend browser checks**; routine/settings codec assertions;
+five distributable builds; focused Ruby lint and whitespace checks. Browser
+screenshots were inspected. Tests use temporary profiles, not live characters.
+The locked Bundler dependencies are unavailable on this machine, so these checks
+used the installed Ruby 4.0.5 tooling, not a fresh lockfile install.
+
+This follow-up does not change combat execution. Interaction alerts, ambiguous
+`buffN` duration semantics and remaining custom compound-condition editors are
+not claimed as complete. No live installation, game commands or live profile
+changes are part of this follow-up.
 
 ## Earlier verification completed locally
 

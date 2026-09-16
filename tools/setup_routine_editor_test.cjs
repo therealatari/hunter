@@ -57,3 +57,30 @@ assert.match(injury.encode({...injury.presets.caster.values, overexerted: true})
 assert.match(injury.encode({...injury.defaults(), scar: '2'}), /Injured.get_injury_data\[1\]/);
 assert.deepEqual(injury.decode(injury.encode({...injury.defaults(), scar: '2'})), {...injury.defaults(), scar: '2'});
 console.log('Injury preset codec checks passed.');
+
+for (const command of ['mstrike', 'mstrike kick', 'wand', 'wandolier offensive noreserve', 'wandolier defensive',
+  'jewel arcaneintensity', 'curse nightmare', 'efury cold', 'efury', 'tether recast', 'tether', 'phase', 'caststop 713',
+  'unravel 101', 'unravel', 'resonance 511 512 513', 'sacrifice', 'smite', 'leech', 'berserk', 'depress',
+  'store both', 'wield staff right', 'script mycombat TargetName', 'force incant 1002 until 101', 'eachtarget curse weakness', 'haste attack']) {
+  const model = codec.decodeAction(command, maneuvers);
+  assert.notEqual(model.kind, 'custom', command);
+  assert.equal(codec.encodeAction(model, maneuvers), command);
+}
+assert.equal(codec.encodeAction(codec.actionDefaults('mstrike')), 'mstrike');
+assert.throws(() => codec.encodeAction({...codec.actionDefaults('force'), inner: 'attack, quit'}), /one inner action/);
+assert.throws(() => codec.encodeAction({...codec.actionDefaults('jewel'), mnemonic: 'x;quit'}), /mnemonic/);
+assert.throws(() => codec.encodeAction({...codec.actionDefaults('resonance'), spells: '511'}), /two spell/);
+codec.registerBuffConditions(['shout', 'animate']); codec.registerBuffConditions(['shout']);
+assert.equal(codec.flags.filter(([key]) => key === 'shout').length, 1);
+assert.match(codec.describe('!shout'), /Not: my shout buff is active/);
+assert.equal(codec.describe('k1'), 'I am kneeling');
+const settings = require('../scripts/eohunter/setup/assets/settings-editor.js');
+assert.deepEqual(settings.lines(['stand', 'script waggle']), ['stand', 'script waggle']);
+assert.equal(settings.lines([['stance defensive', 'stand']]), null);
+assert.equal(settings.replaceLines('stand', ['stand', 'sit']), 'stand, sit');
+assert.deepEqual(settings.replaceLines(['stand'], ['sit']), ['sit']);
+assert.throws(() => settings.replaceLines('', ['a,b']), /one non-empty entry/);
+assert.equal(settings.boonChoice(['dispelling'], ['dispelling'], 'dispelling'), 'flee');
+assert.deepEqual(settings.setBoons(['custom', 'dispelling'], ['future'], ['dispelling'], 'flee'), {boons_ignore: ['custom'], boons_flee: ['future', 'dispelling']});
+assert.deepEqual(settings.setBoons(['custom', 'dispelling'], ['future', 'dispelling'], ['dispelling'], 'fight'), {boons_ignore: ['custom'], boons_flee: ['future']});
+console.log('Specialized action, ordered-list and boon codec checks passed.');

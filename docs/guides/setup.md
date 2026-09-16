@@ -456,3 +456,54 @@ engine is introduced, and field/town recovery routing stays with Hunter.
 Live area verification and native Windows/macOS acceptance remain separate
 gates. Do not infer them from Linux fixtures. Any future in-game trial starts
 and ends at an agreed safe location with an explicit stop/return plan.
+
+## Guided configuration coverage update
+
+The development editor now includes the following controls over existing
+Hunter settings. Saving these controls never executes a command or starts a hunt.
+
+- **Area & creatures → Boon creatures:** choose Fight, Do not target, or Leave
+  the room for each ability in the installed Hunter recognition table. Bulk
+  choices affect only the listed abilities; unknown imported names remain intact
+  in the original lists. Fight does not override your normal creature selection.
+- **Combat → Unarmed combat and MSTRIKE:** choose the excellent-positioning
+  attack, aiming, SMITE, multi-target threshold, cooldown and stamina options.
+  The legacy `uac_mstrike` flag is inverted: the control is deliberately labelled
+  **Disable automatic unarmed MSTRIKE**.
+- **Combat / Equipment → Wands and spell fallback:** set fresh/depleted
+  containers, wand types and unaffordable-spell fallback together.
+- **Rest → How to return:** choose a named native return method, conditional
+  fogging, Rift handling and waypoints. Custom return commands have an ordered
+  editor. A choice is not proof that the character knows or can afford it.
+- **Preparation and rest lists:** add, update, reorder or remove individual
+  commands and services. Script-list entries are script names and arguments;
+  command-list entries use `script NAME` when calling a script. Existing arrays
+  remain arrays. Nested/custom imported structures stay in the raw editor.
+- **Combat action rows:** specialized builders cover wandolier, MSTRIKE,
+  gemstone mnemonics, curse variants, Earthen Fury, tether, cast-and-stop,
+  unravelling, resonance rotations, equipment operations, combat scripts,
+  `force`, `eachtarget` and buff prefixes. For a wrapper, open **Choose the inner
+  action**, update that action, then add/update the outer step. Modifiers belong
+  to the outer step. Unsupported imported arguments remain custom text.
+- **Action conditions:** native named-buff checks join the existing resource,
+  effect and target choices, along with kneeling and UAC follow-up conditions.
+- **Alternative combat sequences:** edit full-mind group and quick-target
+  routines separately from the ordinary sequence.
+- **Multi-Account Team:** roster/readiness, travel, resting and looting settings
+  are grouped by purpose. This is not a receiver-enrollment interface.
+- **Your character → Profile notes:** save personal reminders as editor
+  metadata, without adding hunting instructions.
+
+### Not claimed by this update
+
+Interaction-alert windows and monitor/safe-string rules still need a separate
+runtime design. The GUI labels the existing death switches as **Log out on
+death** and **DEPART on death**, not low-health logout or guaranteed automatic
+restart. It does not change their implementation.
+
+The native `buffN` duration gate needs a semantic review before adding a
+friendly “refresh with N seconds left” control: the current source skips while
+the active buff's remaining time is **at or below** `N / 60.0`, which does not
+match that label. Existing syntax remains preserved. Other specialized/custom
+conditions and compound `and` expressions remain available through original
+routine text, not a claim of complete no-code parity.

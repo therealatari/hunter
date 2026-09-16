@@ -7,6 +7,21 @@ RSpec.describe EO::HunterSetup::Schema do
   subject(:schema) { described_class.new(profile_class: EO::Engine::Profile, cleanse_policy_class: EO::Engine::Cleanse::Policy) }
   let(:raw) { { 'hunting_room_id' => '42', 'resting_room_id' => '100', 'targets' => 'kobold', 'hunting_commands' => 'attack' } }
 
+  it 'presents native boon and buff vocabularies rather than a second execution table' do
+    expect(schema.boon_abilities.map { |entry| entry[:key] }).to match_array(EO::Engine::Targets::BOON_ADJECTIVES.keys)
+    expect(schema.boon_abilities).to include(hash_including(key: 'dispelling', adjectives: %w[dazzling flashy]))
+    expect(schema.routine_buff_conditions).to match_array(EO::Engine::Engage::Conditions::BUFF_WORDS.keys)
+  end
+
+  it 'names fog values in native order and does not mislabel inverted UAC or death flags' do
+    fields = schema.fields.to_h { |field| [field['key'], field] }
+    options = fields['fog_return']['options'].to_h { |option| [option['value'], option['label']] }
+    expect(options).to include('4' => 'Sigil of Escape', '5' => 'Familiar Gate (930)', '6' => 'Custom return commands')
+    expect(fields['uac_mstrike']['label']).to start_with('Disable')
+    expect(fields['dead_man_switch']['help']).to include('not a low-health logout trigger')
+    expect(fields['tier3']['options'].map { |option| option['value'] }).to eq(%w[jab punch grapple kick])
+  end
+
   it 'reuses the installed maneuver words without asserting they are learned' do
     expect(schema.routine_maneuvers).to include(word: 'bullrush', category: 'cman', name: 'Bull Rush')
     expect(schema.routine_maneuvers.map { |entry| entry[:word] }).to match_array(EO::Engine::Actions::Maneuver::WORDS.keys)

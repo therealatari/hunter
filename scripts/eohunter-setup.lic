@@ -1,0 +1,27 @@
+=begin
+  eohunter-setup: local browser profile editor
+  Start with ;eohunter setup or ;eohunter-setup. Stop with ;kill eohunter-setup.
+  Saves EOHunter configuration only; it never starts a hunt.
+=end
+
+me = Script.current
+exit if Script.list.any? { |other| other.name == me.name && !other.equal?(me) }
+
+load File.join(SCRIPT_DIR, 'eohunter', 'setup', 'runtime.rb') unless defined?(::EO::HunterSetup::Runtime)
+EO::HunterSetup::Runtime.load_support(SCRIPT_DIR)
+server = EO::HunterSetup::Runtime.server(
+  data_dir: DATA_DIR, game: XMLData.game, character: Char.name,
+  char_settings: CharSettings.to_hash,
+  templates: defined?(CreatureTemplate) ? CreatureTemplate.all : [],
+  rooms: Map.list, uid_resolver: ->(uid) { Map.ids_from_uid(uid) },
+  map_dir: defined?(MAP_DIR) ? MAP_DIR : nil
+)
+before_dying { server.shutdown }
+begin
+  server.start
+  Lich::Messaging.msg('info', "eohunter setup: #{server.url}")
+  EO::HunterSetup::Runtime.open_browser(server.url, host: self)
+  server.join
+ensure
+  server.shutdown
+end

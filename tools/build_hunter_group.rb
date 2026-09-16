@@ -35,11 +35,17 @@ module EOHunter
       result = lines.take(starts.first)
       result << "# Built from scripts/eohunter_group/ (commit #{sha || 'unknown'}).\n"
       sections = {}
+      %w[store composition].each do |part|
+        path = "eohunter/setup/#{part}.rb"
+        source = Build.setup_source(Build.strip_pragma(Build.read(root, "scripts/#{path}")), "setup/#{part}")
+        Build.append_marked(result, sections, path, source)
+      end
       parts.each do |part|
         source = Build.strip_pragma(Build.read(root, "scripts/eohunter_group/#{part}.rb"))
         source = source.lines.reject do |line|
           match = line.match(/^require_relative ['"]([^'"]+)['"]\s*$/)
           next false unless match
+          next true if match[1] == '../eohunter/setup/composition'
           raise ArgumentError, "unbundled HunterGroup dependency: #{match[1]}" unless parts.include?(match[1])
 
           true

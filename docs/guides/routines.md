@@ -27,6 +27,15 @@ parenthesis is a modifier, checked before the line runs; if any one of
 them says skip, the line is skipped without sending and the routine
 moves on. A skipped line is not a failed action.
 
+`untildead` retains the current step after a successful action, once per engine
+turn, until the target changes or disappears. Conditions and higher-priority
+behaviours still run between attempts; a skip or unsuccessful action advances
+normally. Target changes restart the routine. For example,
+`719 (once), 711 (x2), 705 (untildead)` stays on successful 705 actions after
+the opener rather than cycling back immediately. Do not combine `untildead`
+with `once`, `room` or expanded repeats. This modifier requires the updated
+engine; older engines may silently ignore unknown modifiers.
+
 Before a line runs Engage also does the standing work: the hunting
 stance unless the word is stance-free (a spell number, wait, sleep,
 wand, berserk, script, hide, nudgeweapon), the weapon reaction, and the

@@ -21,6 +21,7 @@ module ::EO
 end
 
 # BEGIN SOURCE PARTS
+require File.join(SCRIPT_DIR, 'eohunter', 'setup', 'composition.rb')
 EO::HunterGroup::PARTS.each do |part|
   require File.join(SCRIPT_DIR, 'eohunter_group', "#{part}.rb")
 end

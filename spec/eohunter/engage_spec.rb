@@ -486,6 +486,74 @@ RSpec.describe EO::Engine::Behaviors::Engage do
     expect(skipped.failed?).to be(false)
   end
 
+  it 'repeats untildead one action per tick and restarts the opener for a new target' do
+    policy.routines['a'] = ['jab', 'attack (untildead)']
+    4.times { engage.tick(world) }
+    expect(calls.select { |tag, _| tag == :attack }.map { |_, args| args[:command] }).to eq(%w[jab attack attack attack])
+    room.targets = [npc(3)]
+    engage.tick(world)
+    expect(calls.last).to eq([:attack, { command: 'jab', target: '3' }])
+    room.targets = []
+    count = calls.size
+    expect(engage.tick(world).reason).to eq(:no_target)
+    expect(calls.size).to eq(count)
+  end
+
+  it 'checks conditions on every untildead tick and advances on a failed condition' do
+    policy.routines['a'] = ['attack (m40 untildead)', 'jab']
+    engage.tick(world)
+    me.mana = 39
+    expect(engage.tick(world).reason).to eq(:condition)
+    engage.tick(world)
+    expect(calls.select { |tag, _| tag == :attack }.map { |_, args| args[:command] }).to eq(%w[attack jab])
+  end
+
+  it 'does not retain an untildead cursor after an action failure or interruption' do
+    policy.routines['a'] = ['attack (untildead)', 'jab']
+    refused = EO::Engine::Actions::Result.new(status: :failed, reason: :interrupted)
+    allow(EO::Engine::Actions::Attack).to receive(:new).and_return(instance_double(EO::Engine::Actions::Attack, call: refused))
+    expect(engage.tick(world)).to equal(refused)
+    expect(EO::Engine::Actions::Attack).to receive(:new).with(world, target: room.targets.first, command: 'jab')
+    engage.tick(world)
+  end
+
+  it 'lets priority targeting replace an untildead target' do
+    policy.priority = true
+    policy.routines = { 'a' => ['jab', 'attack (untildead)'] }
+    room.targets = [npc(3, 'orc')]
+    2.times { engage.tick(world) }
+    room.targets.unshift(npc(4))
+    engage.tick(world)
+    expect(calls.last).to eq([:attack, { command: 'jab', target: '4' }])
+  end
+
+  it 'yields repeat-on-target to the engine arbiter, holds and stop requests' do
+    policy.routines['a'] = ['attack (untildead)']
+    urgent = EO::Engine::Behavior.new
+    needed = false
+    allow(urgent).to receive(:priority).and_return(0)
+    allow(urgent).to receive(:wants_control?) { needed }
+    allow(urgent).to receive(:tick).and_return(EO::Engine::Actions::Result.new(status: :success))
+    engine = EO::Engine::Engine.new(world: world, behaviors: [urgent, engage], interval: 0)
+    engine.tick
+    expect(calls.count { |tag, _| tag == :attack }).to eq(1)
+    needed = true
+    engine.tick
+    expect(urgent).to have_received(:tick).once
+    expect(calls.count { |tag, _| tag == :attack }).to eq(1)
+    needed = false
+    engine.pause!
+    engine.tick
+    expect(calls.count { |tag, _| tag == :attack }).to eq(1)
+    engine.resume!
+    engine.tick
+    expect(calls.count { |tag, _| tag == :attack }).to eq(2)
+    engine.stop!(:manual_stop)
+    engine.tick
+    expect(calls.count { |tag, _| tag == :attack }).to eq(2)
+    expect(engine.stop_reason).to eq(:manual_stop)
+  end
+
   # bigshot spell_is_selfcast? 5785: only 506/902/411 were handled, so a
   # cleric's "303" went out as `cast #1` at the kobold - mana spent, the
   # creature buffed, our own ward never refreshed.

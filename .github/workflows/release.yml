@@ -21,8 +21,12 @@ jobs:
           ruby-version: '3.4'
           bundler-cache: true
       - run: bundle exec rspec
-      - run: bundle exec rake build:group
+      - run: bundle exec rake build
       - run: ruby -c dist/eohunter.lic
+      - run: ruby -c dist/libeocoordination.lic
+      - run: ruby -c dist/eohunter-setup.lic
+      - run: ruby -c dist/libeohuntergroup.lic
+      - run: ruby -c dist/eohunter-ma-group.lic
       - name: Check the tag matches the engine version
         run: |
           version=$(ruby -e "puts File.read('scripts/eohunter/engine.rb')[/VERSION = '([^']+)'/, 1]")
@@ -32,9 +36,11 @@ jobs:
           files: |
             dist/eohunter.lic
             dist/eohunter.lic.map
+            dist/libeocoordination.lic
+            dist/libeocoordination.lic.map
+            dist/eohunter-setup.lic
+            dist/eohunter-setup.lic.map
             dist/eohunter-ma-group.lic
             dist/libeohuntergroup.lic
             dist/libeohuntergroup.lic.map
-            dist/libeocoordination.lic
-            dist/libeocoordination.lic.map
           generate_release_notes: true

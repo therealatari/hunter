@@ -83,16 +83,19 @@ module EO::Engine
     # @return [String, nil, Hash{String => Object}]
     attr_reader :name, :settings, :source
 
-    # The profile YAML at +path+, named by its basename.
+    # Read the profile YAML at +path+, named by its basename. Native envelopes
+    # resolve their defaults and plans before the ordinary policy conversion.
     #
     # @param path [String] the profile YAML
     # @param uid_ids [#call] (uid) -> [lich ids]; World#uid_ids
     # @return [Profile]
     def self.load(path, uid_ids: nil)
-      require 'yaml'
-      new(YAML.safe_load_file(path, permitted_classes: [Symbol]) || {}, name: File.basename(path, '.yaml'), uid_ids: uid_ids)
+      raw = EO::HunterSetup::Composition.read_profile(path)
+      new(raw, name: File.basename(path, '.yaml'), uid_ids: uid_ids)
     end
 
+    # Capture effective settings and validate their policies without executing
+    # commands. Recovery overrides retain explicit false and empty values.
     # @param raw [Hash{String => Object}] the YAML as loaded
     # @param name [String, nil] the profile's name
     # @param uid_ids [#call, nil] (uid) -> [lich ids]; default answers
@@ -101,6 +104,15 @@ module EO::Engine
       @name = name
       @source = Marshal.load(Marshal.dump(raw))
       @uid_ids = uid_ids || ->(_uid) { [] }
+      @recovery = raw.fetch('recovery', {})
+      raise ArgumentError, 'recovery must be a mapping' unless @recovery.is_a?(Hash)
+
+      @recovery = @recovery.to_h { |key, value| [key.to_sym, value] }.freeze
+      @recovery.each do |key, value|
+        next unless Cleanse::KEYS.include?(key)
+        valid = key == :safe_room ? value.is_a?(String) : [true, false].include?(value)
+        raise ArgumentError, "invalid recovery setting: #{key}" unless valid
+      end
       # RULES.freeze is shallow, so the [], {} and ['any'] defaults are one
       # object shared by every Profile in the process. A Policy that appends
       # to what it takes for its own list then edits the default itself, and
@@ -135,6 +147,17 @@ module EO::Engine
     # @param key [String, Symbol]
     # @return [Object, nil]
     def [](key) = @settings[key.to_s]
+
+    # Explicit Hunter fields override compatibility values, including false.
+    # Legacy rally remains owned by its profile toggle (bigshot load_settings).
+    # @param path [String] read-only ecleanse compatibility file
+    # @param char_settings [Hash] legacy fallback toggles
+    # @return [Cleanse::Policy] captured recovery configuration for this hunt
+    def recovery_policy(path:, char_settings: {})
+      fallback = Cleanse::Policy.load(path, char_settings: char_settings)
+      fallback.troubadours_rally = self['troubadours_rally']
+      Cleanse::Policy.new(**fallback.to_h.merge(@recovery))
+    end
 
     # Refuse unsupported coordination before group registration or game actions.
     # The two-site protocol is opt-in; legacy groups and LAB retain one refuge.

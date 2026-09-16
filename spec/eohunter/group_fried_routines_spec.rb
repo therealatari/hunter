@@ -51,6 +51,17 @@ RSpec.describe EO::Engine::Behaviors::Assist, 'individual fried routines' do
     expect(assist).to have_received(:dispatch).with(world, 'attack #1', anything).once
   end
 
+  it 'lets the fried routine interrupt a repeat-until-dead step on the same target' do
+    policy.routines = { 'a' => ['attack target(untildead)', 'jab target'] }
+    assist.tick(world)
+    assist.tick(world)
+    full[0] = true
+    assist.tick(world)
+    expect(assist).to have_received(:dispatch).with(world, 'attack #1', anything).twice
+    expect(assist).not_to have_received(:dispatch).with(world, 'jab #1', anything)
+    expect(assist).to have_received(:dispatch).with(world, 'stance defensive', anything).once
+  end
+
   it 'keeps ordinary combat for existing profiles without disable_commands' do
     policy.disable_commands = []
     full[0] = true

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>EOHunter · Hunt setup</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/routine-editor.js" defer></script>
+  <script src="/injury-editor.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to editor</a>
+  <header class="topbar">
+    <button id="nav-toggle" class="icon-button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">E</span><div>EOHunter<small>HUNT SETUP</small></div></div>
+    <div id="context" class="context">Connecting to your character…</div>
+    <span class="pill">LOCAL SETUP</span>
+  </header>
+  <div class="layout">
+    <aside id="sidebar" aria-label="Setup navigation">
+      <label class="search-label" for="search">Find a setting</label>
+      <input id="search" type="search" placeholder="Mind, spell, ecleanse, key…" autocomplete="off">
+      <div id="search-results" aria-live="polite"></div>
+      <nav id="navigation" aria-label="Editor sections"></nav>
+      <div class="sidebar-note"><strong>A plan, not a launch.</strong><br>Setup never starts or changes a running hunt.</div>
+    </aside>
+    <div class="workspace">
+      <section class="draftbar" aria-label="Current draft">
+        <div><span id="scope" class="eyebrow">HUNT PROFILE</span><strong id="draft-name">Untitled hunt</strong><span id="dirty" class="draft-state">New draft</span></div>
+        <div class="actions"><button id="guided-toggle">Guided setup</button><button id="review-button" class="primary">Review & save</button></div>
+      </section>
+      <div id="content-pane">
+        <div id="status" role="status" aria-live="polite"></div>
+        <section id="wizard" aria-label="Guided setup" hidden></section>
+        <main id="main" tabindex="-1"></main>
+        <footer>EOHunter-owned files · Legacy sources stay read-only · Saving is separate from starting</footer>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

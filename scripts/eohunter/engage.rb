@@ -210,6 +210,10 @@ module EO::Engine
 
     # The routine compiler: profile entries to Lines.
     module Routine
+      # Opt-in cursor retention, not a blocking loop. Conditions and the engine
+      # priority scheduler still run between every action. Failed/skipped steps
+      # advance normally so this cannot trap a routine on an unavailable action.
+      REPEAT_UNTIL_TARGET_GONE = 'untildead'
       # bigshot COMMAND_MODIFIER_REGEX, reduced to "the trailing
       # parenthesis holds the modifiers"; each known word is checked in
       # Conditions, unknown words are reported and ignored.
@@ -1037,7 +1041,8 @@ module EO::Engine
         line = @routine[@cursor]
         result = run_line(world, line)
         held_preparation = named_preparation?(line.text) && result&.skipped? && result.reason != :condition
-        @cursor = (@cursor + 1) % @routine.size unless held_preparation
+        repeat_target = result&.success? && line.modifiers.any? { |mod| mod.casecmp?(EO::Engine::Engage::Routine::REPEAT_UNTIL_TARGET_GONE) }
+        @cursor = (@cursor + 1) % @routine.size unless held_preparation || repeat_target
         result
       end
 

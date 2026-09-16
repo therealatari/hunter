@@ -54,7 +54,9 @@ module EOHunter
       append_marked(lines, map, 'eohunter/engine.rb', strip_load_parts(strip_pragma(engine)))
       lines.concat(inline_loader(sha).lines)
       parts.each do |part|
-        append_marked(lines, map, "eohunter/#{part}.rb", strip_pragma(read(root, "scripts/eohunter/#{part}.rb")))
+        source = strip_pragma(read(root, "scripts/eohunter/#{part}.rb"))
+        source = setup_source(source, part) if part.start_with?('setup/')
+        append_marked(lines, map, "eohunter/#{part}.rb", source)
       end
       lines << "#{format(MARKER, 'eohunter.lic')}\n"
       lines.concat(tail.lines)
@@ -118,6 +120,16 @@ module EOHunter
     # @param source [String]
     # @return [String]
     def strip_pragma(source) = source.sub(PRAGMA, '')
+
+    # Shared setup readers survive Engine reload; bundled dependencies are inline.
+    # @param source [String] one setup module's source
+    # @param part [String] setup/name, matching its class
+    # @return [String] guarded source without relative disk dependencies
+    def setup_source(source, part)
+      name = File.basename(part).split('_').map(&:capitalize).join
+      body = source.gsub(/^require_relative .*\n/, '').sub(/^module EO$/, 'module ::EO')
+      "unless defined?(::EO::HunterSetup::#{name})\n#{body}end\n"
+    end
 
     # engine.rb ends by loading the parts from its directory; the built
     # file has them inline instead.

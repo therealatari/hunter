@@ -26,10 +26,14 @@
           game: Gemstone
           tags: hunting, combat, eo
       required: Lich >= 5.20.1
-       version: 0.5.1
+       version: 0.6.0
 
   Version Control:
   Major_change.feature_addition.bugfix
+  v0.6.0 (2026-09-16)
+    - local browser setup preview; EOHunter-owned profiles/defaults/plans
+    - read-only Bigshot import and ecleanse fallback; native recovery overrides
+    - area previews, configuration review and standalone setup distribution
   v0.5.1 (2026-09-10)
     - group liveness pulses between ticks (a blocking action no longer reads
       as a lost member or dead leader); a follower's hunting_scripts_stop no
@@ -67,8 +71,15 @@
     - initial: loads the engine, installs the watch, reports the parts
 =end
 
-# This short-lived CLI shim must dispatch before the duplicate guard and the
-# reloadable engine. The persistent receiver starts the exact owned head child.
+# Setup has its own native script lifetime, and must precede engine reload
+# even when a hunt is already running in this character's Lich process.
+if script.vars[1].to_s.casecmp?('setup')
+  Script.start('eohunter-setup') unless Script.running?('eohunter-setup')
+  exit
+end
+
+# The short-lived group command delegates to the persistent native owner before
+# any duplicate check or engine reload can disturb a managed hunt.
 if script.vars[2].to_s.casecmp?('group')
   raise ArgumentError, 'usage: ;eohunter <profile> group' unless script.vars[3..].to_a.empty?
 
@@ -141,18 +152,11 @@ module EOHunter
     raise ArgumentError, "strict coordination requires libeocoordination #{COORDINATION_LIBRARY_VERSION}: #{e.message}"
   end
 
-  # Where this character's bigshot profile lives.
+  # Native copies take precedence over read-only Bigshot compatibility input.
   # @param name [String] the profile name
   # @return [String] data/<game>/<char>/bigshot_profiles/<name>.yaml
   def self.profile_path(name)
-    # basename only: the name is the first script argument, and interpolated
-    # whole it walked out of the profile directory - `;eohunter ../../foo`
-    # read any YAML on disk. Separators are stripped rather than rejected,
-    # so an ordinary profile name still works untouched.
-    safe = File.basename(name.to_s.tr("\\\\", '/')).sub(/\A[.\s]+/, '')
-    raise ArgumentError, "bad profile name: #{name.inspect}" if safe.empty?
-
-    File.join(DATA_DIR, XMLData.game, Char.name, 'bigshot_profiles', "#{safe}.yaml")
+    EO::HunterSetup::Composition.profile_path(name, data_dir: DATA_DIR, game: XMLData.game, character: Char.name)
   end
 
   # Every event worth a line in the front end, and the few that change
@@ -348,9 +352,8 @@ module EOHunter
     # Rest drives Loot for the final loot before leaving (should_rest? 9041)
     rest = E::Behaviors::Rest.new(policy: rest_policy, counters: counters, loot: loot, group: leader,
                                   scripts: scripts, travel: travel, buffs: buffs)
-    cleanse_policy = E::Cleanse::Policy.load(File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'), char_settings: CharSettings.to_hash)
+    cleanse_policy = profile.recovery_policy(path: File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'), char_settings: CharSettings.to_hash)
     # bigshot's Troubadour's Rally toggle: 1040 on ourselves and the group
-    cleanse_policy.troubadours_rally = profile['troubadours_rally']
     cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel)
     survival = E::Behaviors::Survival.new(policy: profile.survival_policy, resting: -> { rest.resting? })
     flee_policy = profile.flee_policy
@@ -507,8 +510,7 @@ module EOHunter
                                       sneaky: wander_policy.sneaky, scripts: scripts, travel: travel)
     loadout = E::Behaviors::Loadout.new(policy: profile.loadout_policy, selection: profile.loadout_selection,
                                         owner: assist, resting: -> { orders.resting? })
-    cleanse_policy = E::Cleanse::Policy.load(File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'), char_settings: CharSettings.to_hash)
-    cleanse_policy.troubadours_rally = profile['troubadours_rally']
+    cleanse_policy = profile.recovery_policy(path: File.join(DATA_DIR, XMLData.game, Char.name, 'ecleanse.yaml'), char_settings: CharSettings.to_hash)
     cleanse = E::Behaviors::Cleanse.new(policy: cleanse_policy, travel: travel)
     survival = E::Behaviors::Survival.new(policy: profile.survival_policy, resting: -> { orders.resting? }, follower: true)
     flee = E::Behaviors::Flee.new(policy: profile.flee_policy, targets_policy: targets_policy, walker: walker,

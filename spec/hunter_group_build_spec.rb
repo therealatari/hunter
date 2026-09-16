@@ -27,6 +27,14 @@ RSpec.describe EOHunter::GroupBuild do
         abort 'started worker on library load' unless Thread.list == before
         abort 'loaded hunting engine' if defined?(EO::Engine)
         abort 'missing group library' unless defined?(EO::HunterGroup)
+        root = File.join(Dir.pwd, 'data')
+        store = EO::HunterSetup::Store.new(root: File.join(root, 'TEST', 'Leader', 'eohunter'))
+        store.save(:profiles, 'Trio', { 'schema_version' => 1, 'settings' => {
+          'group_members' => ['Follower'], 'resting_room_id' => 324
+        } }, expected_revision: nil)
+        config = EO::HunterGroup.read_group_profile('Trio', data_dir: root, game: 'TEST', character: 'Leader')
+        abort 'native setup profile was not loaded' unless config == { members: ['Follower'], refuge_room: 324 }
+        abort 'profile read loaded hunting engine' if defined?(EO::Engine)
       RUBY
       _out, err, status = Open3.capture3(RbConfig.ruby, '-e', program, coordination, group, chdir: dir)
       expect(status.success?).to be(true), err

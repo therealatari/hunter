@@ -27,6 +27,35 @@ jobs:
       - run: bundle exec rspec spec/eocoordination
       - run: bundle exec rake build
       - run: bundle exec ruby -c dist/libeocoordination.lic
+      - run: bundle exec rspec spec/eohunter/setup spec/eohunter/native_profile_spec.rb spec/setup_build_spec.rb
+      - run: bundle exec ruby -c dist/eohunter-setup.lic
+
+  setup-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Browser tooling is a CI/development dependency, not a player dependency.
+      - run: npm install --prefix "$RUNNER_TEMP/hunter-setup-browser" playwright@1.63.0
+      - run: '"$RUNNER_TEMP/hunter-setup-browser/node_modules/.bin/playwright" install --with-deps chromium'
+      - run: node --check scripts/eohunter/setup/assets/app.js
+      - run: node tools/setup_routine_editor_test.cjs
+      - run: bundle exec rspec spec/eohunter/setup/routine_editor_contract_spec.rb
+      - run: node tools/setup_ui_test.mjs
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/hunter-setup-browser/node_modules/playwright/index.mjs
+      - run: bundle exec ruby -v && node tools/setup_ui_acceptance.mjs
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/hunter-setup-browser/node_modules/playwright
+      - run: node tools/setup_ui_layout.mjs
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/hunter-setup-browser/node_modules/playwright
 
   build:
     runs-on: ubuntu-latest
@@ -47,6 +76,7 @@ jobs:
       - run: bundle exec rake build
       - run: ruby -c dist/eohunter.lic
       - run: ruby -c dist/libeocoordination.lic
+      - run: ruby -c dist/eohunter-setup.lic
       - uses: actions/upload-artifact@v4
         with:
           name: eohunter-scripts
@@ -55,4 +85,6 @@ jobs:
             dist/eohunter.lic.map
             dist/libeocoordination.lic
             dist/libeocoordination.lic.map
+            dist/eohunter-setup.lic
+            dist/eohunter-setup.lic.map
           if-no-files-found: error

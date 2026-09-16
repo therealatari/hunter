@@ -1,9 +1,15 @@
 # Profiles
 
-eohunter reads bigshot profiles unchanged: the YAML that bsprofiles
-writes to `data/<game>/<char>/bigshot_profiles/<name>.yaml`. This page
-lists every key the engine honours, how its value is read, its default
-when blank, and which behavior uses it. Keys not listed are ignored.
+eohunter reads its own profiles from
+`data/<game>/<char>/eohunter/profiles/<name>.yaml`, falling back to the
+unchanged YAML that bsprofiles writes to
+`data/<game>/<char>/bigshot_profiles/<name>.yaml` when no native namesake
+exists. The [browser setup guide](setup.md) describes native envelopes,
+linked defaults and Combat Plans, and Hunter-owned recovery preferences.
+Existing flat profiles remain supported. This page lists the effective
+settings the engine honours, how each value is read, its default when
+blank, and which behavior uses it. Unknown settings are ignored by the
+engine but preserved by the editor.
 
 Values are cleaned the way bigshot's `clean_value` does. A missing or
 blank value is the default for legacy value types, booleans included.

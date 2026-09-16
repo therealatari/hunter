@@ -2,24 +2,22 @@
 
 require_relative 'tools/build'
 require_relative 'tools/build_coordination'
+require_relative 'tools/build_setup'
 require_relative 'tools/build_hunter_group'
 
-desc 'Build the single-file dist/eohunter.lic from the parts under scripts/eohunter/'
+desc 'Build the single-file EOHunter, browser setup and coordination scripts'
 task :build do
-  root = __dir__
-  path = EOHunter::Build.write(root: root)
-  puts "built #{path} (#{File.read(path).lines.size} lines), map at #{path}.map"
-end
-
-desc 'Build EOHunter and its optional multi-account receiver and libraries'
-task 'build:group' => :build do
   require 'fileutils'
   root = __dir__
-  [EOCoordination::Build, EOHunter::GroupBuild].each do |builder|
-    puts "built #{builder.write(root: root)}"
+  [EOHunter::Build, EOCoordination::Build, EOHunter::SetupBuild, EOHunter::GroupBuild].each do |builder|
+    path = builder.write(root: root)
+    puts "built #{path} (#{File.read(path).lines.size} lines), map at #{path}.map"
   end
   FileUtils.cp(File.join(root, 'scripts', 'eohunter-ma-group.lic'), File.join(root, 'dist', 'eohunter-ma-group.lic'))
 end
+
+desc 'Build EOHunter, setup, and its optional multi-account receiver and libraries'
+task 'build:group' => :build
 
 desc 'Remove dist/'
 task :clean do

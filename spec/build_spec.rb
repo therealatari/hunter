@@ -35,7 +35,9 @@ RSpec.describe EOHunter::Build do
     parts.each do |part|
       first, last = result.sections.fetch("eohunter/#{part}.rb")
       body = lines[(first - 1)...last].join
-      expect(body).to eq(described_class.strip_pragma(File.read(File.join(root, "scripts/eohunter/#{part}.rb")).gsub("\r\n", "\n")).sub(/\n*\z/, "\n"))
+      source = described_class.strip_pragma(File.read(File.join(root, "scripts/eohunter/#{part}.rb")).gsub("\r\n", "\n"))
+      source = described_class.setup_source(source, part) if part.start_with?('setup/')
+      expect(body).to eq(source.sub(/\n*\z/, "\n"))
     end
   end
 
@@ -48,7 +50,7 @@ RSpec.describe EOHunter::Build do
   end
 
   it 'defines the same modules and classes as the parts' do
-    names = ->(src) { src.scan(/^\s*(?:module|class) ([A-Z][\w:]*)/).flatten.sort }
+    names = ->(src) { src.scan(/^\s*(?:module|class) (?:::)?([A-Z][\w:]*)/).flatten.sort }
     from_parts = parts.flat_map { |p| names.call(File.read(File.join(root, "scripts/eohunter/#{p}.rb"))) }.sort
     expect(names.call(built)).to include(*from_parts)
   end

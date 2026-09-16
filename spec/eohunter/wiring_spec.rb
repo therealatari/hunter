@@ -144,6 +144,13 @@ RSpec.describe 'EOHunter wiring' do
   # The profile name is the first script argument, interpolated whole into
   # a path. `;eohunter ../../../../etc/passwd` read any YAML on disk.
   describe '.profile_path' do
+    it 'selects an EOHunter-owned copy before a same-named legacy profile' do
+      native = File.join(DATA_DIR, XMLData.game, Char.name, 'eohunter', 'profiles', 'usual.yaml')
+      allow(File).to receive(:exist?).and_call_original
+      allow(File).to receive(:exist?).with(native).and_return(true)
+      expect(wiring.profile_path('usual')).to eq(native)
+    end
+
     it 'keeps an ordinary name untouched' do
       expect(wiring.profile_path('ojandhaart')).to end_with('bigshot_profiles/ojandhaart.yaml')
       expect(wiring.profile_path('my profile')).to end_with('bigshot_profiles/my profile.yaml')

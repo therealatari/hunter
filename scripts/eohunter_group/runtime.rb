@@ -3,6 +3,7 @@
 require 'securerandom'
 require 'json'
 require 'yaml'
+require_relative '../eohunter/setup/composition'
 
 module ::EO
   module HunterGroup
@@ -24,11 +25,8 @@ module ::EO
     def self.read_group_profile(profile, game: XMLData.game, character: XMLData.name, data_dir: DATA_DIR)
       raise ArgumentError, 'invalid local profile name' unless profile.to_s.match?(/\A[A-Za-z0-9][A-Za-z0-9 _-]{0,127}\z/)
 
-      path = File.join(data_dir, game, character, 'bigshot_profiles', "#{profile}.yaml")
-      data = YAML.safe_load_file(path, permitted_classes: [Symbol], aliases: false)
-      raise ArgumentError, 'profile must contain a mapping' unless data.is_a?(Hash)
-
-      data = data.transform_keys(&:to_s)
+      path = HunterSetup::Composition.profile_path(profile, data_dir: data_dir, game: game, character: character)
+      data = HunterSetup::Composition.read_profile(path).transform_keys(&:to_s)
       members = data['group_members']
       members = members.split(',').map(&:strip).reject(&:empty?) if members.is_a?(String)
       unless members.is_a?(Array) && members.size.between?(1, 7) && members.uniq.size == members.size &&

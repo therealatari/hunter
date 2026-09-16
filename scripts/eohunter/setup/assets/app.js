@@ -336,7 +336,7 @@
       team: ['group_members', 'group_fried_trigger', 'group_strict_movement', 'independent_travel', 'independent_return', 'group_deader', 'ma_looter', 'never_loot', 'random_loot', 'quiet_followers']};
     const fields = state.boot.fields.filter((f) => normalizedPage(f.page) === page && !handled[page]?.includes(f.key) && !(page === 'buffs' && f.key === 'signs') && !(page === 'monitoring' && f.key === 'wounded_eval'));
     if (!fields.length) { main.append(note('No additional settings are described for this page by the installed engine. Unknown extension keys remain available in Raw configuration.')); return; }
-    const isAdvanced = (field) => field.advanced || field.editor === 'raw';
+    const isAdvanced = (field) => field.advanced ?? (field.editor === 'raw');
     const standard = fields.filter((f) => !isAdvanced(f)), advanced = fields.filter(isAdvanced);
     if (standard.length) main.append(el('section', {class: 'card'}, el('div', {class: 'field-grid'}, standard.map(fieldControl))));
     if (advanced.length) main.append(el('details', {class: 'card'}, el('summary', {}, `Advanced settings (${advanced.length})`), el('div', {class: 'field-grid'}, advanced.map(fieldControl))));

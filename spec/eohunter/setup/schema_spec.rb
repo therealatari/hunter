@@ -29,6 +29,20 @@ RSpec.describe EO::HunterSetup::Schema do
     expect(schema.fields.find { |field| field['key'] == 'hunting_stance' }['options']).to include('offensive', 'defensive', '50')
   end
 
+  it 'keeps everyday hunting choices normal and technical controls advanced independently of help copy' do
+    fields = schema.fields.to_h { |field| [field['key'], field] }
+    %w[loot_script priority delay_loot loot_stance final_loot flee_clouds flee_vines flee_webs flee_voids ignore_disks].each do |key|
+      expect(fields.fetch(key)).to include('advanced' => false, 'editor' => 'guided')
+    end
+    %w[flee_message box_in_hand].each do |key|
+      expect(fields.fetch(key)).to include('advanced' => true)
+    end
+    profile_class = Class.new(EO::Engine::Profile)
+    profile_class.const_set(:RULES, EO::Engine::Profile::RULES.merge('future_setting' => [:bool, false]))
+    extension = described_class.new(profile_class: profile_class).fields.find { |field| field['key'] == 'future_setting' }
+    expect(extension).to include('advanced' => true, 'editor' => 'raw')
+  end
+
   it 'rejects repeat-on-target when the loaded engine does not advertise it' do
     hide_const('EO::Engine::Engage::Routine::REPEAT_UNTIL_TARGET_GONE')
     expect(schema.capabilities['repeat_until_target_gone']).to be(false)

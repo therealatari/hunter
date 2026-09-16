@@ -25,9 +25,23 @@ module EO
                              mstrike_stamina_cooldown mstrike_stamina_quickstrike mstrike_mob mstrike_cooldown mstrike_quickstrike]
       }.freeze
 
+      # Technical expressions and obsolete compatibility controls stay tucked
+      # away even when they have friendly labels and descriptions.
+      ADVANCED_FIELDS = %w[flee_message box_in_hand town_rest_required_eval].freeze
+
       # Descriptions reflect Profile and the pure Rest/Flee/Group policies. A
       # missing description deliberately exposes a raw advanced control.
       COPY = {
+        'loot_script'                 => ['Looting script', 'Script to handle loot, for example eloot. Leave blank to use Hunter\'s built-in LOOT commands.'],
+        'priority'                    => ['Switch to higher-priority creatures', 'Allow a creature earlier in your target list to take priority over the current target. Disabled keeps the current target while it remains valid.'],
+        'delay_loot'                  => ['Loot less often during combat', 'While creatures remain, space out looting attempts using the native delay. This does not mean waiting until every creature is dead.'],
+        'loot_stance'                 => ['Use defensive stance when looting in combat', 'Switch to defensive stance before looting while fightable creatures remain.'],
+        'final_loot'                  => ['Check for loot before leaving a room', 'Request a final loot pass before wandering onward. Normal room-claim and looting restrictions still apply.'],
+        'flee_clouds'                 => ['Leave rooms with dangerous clouds', 'Leave when the native room reader recognizes a cloud hazard. This does not identify every possible environmental danger.'],
+        'flee_vines'                  => ['Leave rooms with vine hazards', 'Leave when the native room reader recognizes a vine hazard.'],
+        'flee_webs'                   => ['Leave rooms with web hazards', 'Leave when the native room reader recognizes a web hazard.'],
+        'flee_voids'                  => ['Leave rooms with voids', 'Leave when the native room reader recognizes a void hazard.'],
+        'ignore_disks'                => ['Hunt despite other players\' disks', 'Ignore foreign disks when deciding whether to hunt in a room. Other room-claim rules still apply; this does not authorize taking another player\'s creatures.'],
         'fog_return'                  => ['Return method', 'Choose the native return method before the walk to your rest room. Availability and fallback behavior are handled by Lich; choosing a method does not grant the ability.'],
         'fog_optional'                => ['Teleport only when wounded or encumbered', 'Use the selected return method only for injury or encumbrance; otherwise walk.'],
         'fog_rift'                    => ['Use the native Rift escape option', 'Pass the Rift escape flag to Lich fog handling. Review this for your destination; this is not a general extra teleport switch.'],
@@ -162,6 +176,7 @@ module EO
             'default' => copy_value(default), 'label' => copy ? copy[0] : key.split('_').map(&:capitalize).join(' '),
             'help' => copy ? copy[1] : "Advanced native #{key} setting. Edit its raw value; the installed profile parser applies #{cleaner} normalization.",
             'page' => page || 'hunting', 'aliases' => aliases, 'editor' => copy && cleaner != :structured ? 'guided' : 'raw',
+            'advanced' => ADVANCED_FIELDS.include?(key) || copy.nil? || cleaner == :structured,
             'units' => copy && copy[2], 'scope' => 'hunt or inherited character default'
           }
         end + [recovery_field]

@@ -162,6 +162,19 @@ try {
     assert.deepEqual(draft.settings.custom_extension, {keep_me: false});
   });
 
+  await check('hunting settings show everyday controls and hide technical compatibility controls', async (page) => {
+    await editNamed(page, 'Fixture hunt');
+    await page.locator('#navigation').getByRole('button', {name: 'Hunting behavior', exact: true}).click();
+    for (const key of ['loot_script', 'priority', 'delay_loot', 'loot_stance', 'final_loot', 'flee_clouds', 'flee_vines', 'flee_webs', 'flee_voids', 'ignore_disks']) {
+      assert.equal(await page.locator(`#field-${key}`).isVisible(), true, `${key} should not require Advanced settings`);
+    }
+    for (const key of ['flee_message', 'box_in_hand']) assert.equal(await page.locator(`#field-${key}`).isVisible(), false);
+    await page.getByText('Advanced settings (2)', {exact: true}).click();
+    for (const key of ['flee_message', 'box_in_hand']) assert.equal(await page.locator(`#field-${key}`).isVisible(), true);
+    const draft = await rawDraft(page);
+    assert.equal(Object.hasOwn(draft.settings, 'box_in_hand'), false, 'Viewing categories must not change settings');
+  });
+
   await check('guided gaps: boon choices preserve extensions and round-trip through save', async (page) => {
     await api('save', {kind: 'profiles', name: 'Boon panel test', revision: null, data: {
       schema_version: 1, settings: {...original.data.settings, boons_ignore: ['future_boon', 'dispelling'], boons_flee: ['another_extension']}

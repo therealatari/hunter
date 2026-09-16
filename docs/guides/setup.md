@@ -55,6 +55,9 @@ Choose **Create with guidance** for five chapters:
 
 **Advanced editor** switches to the full section list without copying or
 resetting the draft. Search also takes you to the full editor when necessary.
+Within Hunting behavior, everyday looting, target-priority and hazard choices
+are visible normally. The custom flee-message pattern and obsolete box-in-hand
+compatibility flag stay under Advanced settings even though they have help text.
 Shared defaults and plans can be created from **Reusable settings & current
 draft** on the profiles page. Plans open their command editor, not JSON.
 

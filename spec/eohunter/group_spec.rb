@@ -785,6 +785,87 @@ RSpec.describe EO::Engine::Behaviors::Follow do
     native_follow&.cancel!
   end
 
+  it 'does not start catch-up when group arrival completes in the travel arrival check' do
+    room.players = []
+    reads = 0
+    allow(room).to receive(:id) do
+      reads += 1
+      room.players = [player('Lead')] if reads >= 2
+      1
+    end
+    scripts = double('owned scripts', running?: false, start: nil)
+    native_follow = described_class.new(member: member,
+                                        travel: ->(destination) { EO::Engine::Travel::Trip.new(destination, scripts: scripts, unhide: false) })
+
+    native_follow.tick(world)
+
+    expect(room.players.map(&:noun)).to eq(['Lead'])
+    expect(scripts).not_to have_received(:start)
+  ensure
+    native_follow&.cancel!
+  end
+
+  it 'waits for a native parser cut instead of backtracking during an incomplete room update' do
+    room.players = []
+    room.id = 3944
+    room.count = 2
+    publication = nil # Socket ingress has withdrawn the preceding room cut.
+    allow(member).to receive(:native_reader).and_return(-> { publication })
+    scripts = double('owned scripts', running?: false, start: nil)
+    native_follow = described_class.new(member: member,
+                                        travel: ->(destination) { EO::Engine::Travel::Trip.new(destination, scripts: scripts, unhide: false) })
+
+    result = native_follow.tick(world)
+    expect(scripts).not_to have_received(:start)
+    expect(result.reason).to eq(:state_unconfirmed)
+
+    # The same group arrives; only now is the room's player list complete.
+    room.players = [player('Lead')]
+    publication = { source: { connection_id: 'connection', sequence: 2,
+                              received_at: Process.clock_gettime(Process::CLOCK_MONOTONIC) },
+                    fields: { room: { value: { epoch: 2 } } } }.freeze
+    expect(native_follow.tick(world)).to be_nil
+    expect(scripts).not_to have_received(:start)
+  ensure
+    native_follow&.cancel!
+  end
+
+  it 'revalidates the native cut after travel resolves its destination' do
+    room.players = []
+    room.count = 2
+    publication = { source: { connection_id: 'connection', sequence: 2,
+                              received_at: Process.clock_gettime(Process::CLOCK_MONOTONIC) },
+                    fields: { room: { value: { epoch: 2 } } } }.freeze
+    allow(member).to receive(:native_reader).and_return(-> { publication })
+    scripts = double('owned scripts', running?: false, start: nil)
+    trip = nil
+    invalidated = false
+    native_follow = described_class.new(member: member, travel: lambda { |destination|
+      trip = EO::Engine::Travel::Trip.new(destination, scripts: scripts, unhide: false,
+        at: lambda { |*|
+          publication = nil unless invalidated
+          invalidated = true
+          false
+        })
+    })
+
+    native_follow.tick(world)
+
+    expect(scripts).not_to have_received(:start)
+    expect(trip.attempts).to eq(0)
+    expect(EO::Engine::Travel.underway?).to be false
+
+    # A completed local frame still shows a real separation. Catch-up must
+    # resume without a timer or sacrificing one of go2's attempts.
+    publication = { source: { connection_id: 'connection', sequence: 3,
+                              received_at: Process.clock_gettime(Process::CLOCK_MONOTONIC) },
+                    fields: { room: { value: { epoch: 2 } } } }.freeze
+    native_follow.tick(world)
+    expect(scripts).to have_received(:start).with('go2', '9 --disable-confirm').once
+  ensure
+    native_follow&.cancel!
+  end
+
   it 'waits for native trip arrival cleanup before joining the leader at its destination' do
     scripts = double('owned travel scripts', running?: true, start: nil, kill: nil)
     native_follow = described_class.new(member: member,
@@ -1003,6 +1084,14 @@ RSpec.describe EO::Engine::Behaviors::Rest, 'with a group' do
 
       expect(rest.wants_control?(world)).to be true
       expect(rest.reason).to eq('fried.')
+    end
+
+    it 'names the follower injury that overrides an otherwise unsatisfied all-fried barrier' do
+      group_policy.fried_trigger = ['all']
+      policy.fried = 0
+      hub.report('Bob', report('Bob', rest_reason: 'wounded.'))
+      expect(rest.wants_control?(world)).to be true
+      expect(rest.reason).to eq('Bob: wounded.')
     end
 
     it 'rests only for designated fried members when names are configured' do
@@ -1307,7 +1396,7 @@ RSpec.describe EO::Engine::Profile, 'group policy' do
     expect(profile.survival_policy.group_deader).to be true
     expect(profile['troubadours_rally']).to be true
     expect(described_class.new({}).group_policy.quiet_followers).to be true
-    expect(described_class.new({ 'group_fried_trigger' => 'Skooshii, Calvix' }).group_policy.fried_trigger).to eq(%w[Skooshii Calvix])
+    expect(described_class.new({ 'group_fried_trigger' => 'Testfollower, Testleader' }).group_policy.fried_trigger).to eq(%w[Testfollower Testleader])
   end
 end
 
@@ -1341,6 +1430,32 @@ RSpec.describe EO::Engine::Actions::Join do
   let(:me) { OpenStruct.new(dead?: false) }
   let(:room) { OpenStruct.new(players: [OpenStruct.new(noun: 'Lead')]) }
   let(:world) { OpenStruct.new(me: me, room: room) }
+  let(:native_group) { double('native Group', check: nil, checked?: true) }
+
+  before { stub_const('Lich::Gemstone::Group', native_group) }
+
+  it 'refreshes the complete native roster after a join before reporting success' do
+    roster = ['Lead'] # The real "You join Lead" line does not name the other follower.
+    allow(native_group).to receive(:nouns) { roster }
+    allow(native_group).to receive(:check) { roster = ['Lead', 'Other'] }
+    action = join(ok: OpenStruct.new(noun: 'Lead'))
+
+    expect(action.call).to be_success
+    expect(EO::Engine::World.new.group_nouns.sort).to eq(%w[Lead Other])
+  end
+
+  it 'refreshes an already-member reply too, but never a refused join' do
+    expect(native_group).to receive(:check).once
+    expect(join(noop: true).call).to be_success
+    expect(join(err: true).call).not_to be_success
+  end
+
+  it 'does not report join success when the roster refresh is unanswered' do
+    allow(native_group).to receive(:checked?).and_return(false)
+    result = join(ok: true).call
+    expect(result.status).to eq(:timeout)
+    expect(result.reason).to eq(:group_unconfirmed)
+  end
 
   def join(answer)
     action = described_class.new(world, leader: 'Lead')

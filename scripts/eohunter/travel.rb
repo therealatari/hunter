@@ -78,6 +78,8 @@ module EO::Engine
       # nil while underway; a Result when done.
       #
       # @param world [World]
+      # @yield optional owner check immediately before each go2 launch
+      # @yieldreturn [Boolean] false defers launch without spending an attempt
       # @return [Actions::Result, nil] success with :arrived, failed with
       #   :could_not_reach or :cancelled, nil while go2 is still walking
       def tick(world)
@@ -113,6 +115,12 @@ module EO::Engine
           @retry_at = nil
           Travel.claim(self)
           unhide(world) if @unhide && world.me.hidden?
+          # Map resolution and UNHIDE can yield to a new room frame. The
+          # owner may no longer need this trip when those reads finish.
+          if block_given? && !yield
+            Travel.release(self)
+            return nil
+          end
           @scripts.start(SCRIPT, "#{@place} --disable-confirm")
           @started = true
           Events.emit(:travel_started, place: @place, attempt: @attempts + 1)
@@ -195,9 +203,11 @@ module EO::Engine
     # @param travel [#call] (room) -> Trip or Boolean; see +default+
     # @param room [Integer, String] where to go, as go2 takes it
     # @param world [World]
+    # @yield optional launch check forwarded to a supervised Trip (legacy
+    #   blocking travel factories cannot revalidate inside their own call)
     # @return [Symbol] :arrived, :underway, :failed (one blocking attempt
     #   that did not arrive), or :could_not_reach (a Trip's attempts spent)
-    def self.step(holder, travel, room, world)
+    def self.step(holder, travel, room, world, &before_start)
       trip = holder.instance_variable_get(:@trip)
       trip ||= travel.call(room)
       unless trip.respond_to?(:tick)
@@ -206,7 +216,7 @@ module EO::Engine
       end
 
       holder.instance_variable_set(:@trip, trip)
-      result = trip.tick(world)
+      result = trip.tick(world, &before_start)
       return :underway if result.nil?
 
       holder.instance_variable_set(:@trip, nil)

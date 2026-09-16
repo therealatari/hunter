@@ -8,10 +8,10 @@
 --tag bigshot:"bigshot"
 scripts/eohunter.lic
 scripts/eohunter/*.rb
-scripts/libeocoordination.lic
-scripts/eocoordination/*.rb
+scripts/libeohuntergroup.lic
+scripts/eohunter_group/*.rb
 tools/build.rb
-tools/build_coordination.rb
+tools/build_hunter_group.rb
 -
 docs/guides/getting-started.md
 docs/guides/profiles.md
@@ -21,11 +21,11 @@ docs/guides/architecture.md
 docs/guides/coordination-hold-pilot.md
 docs/guides/strict-group-movement.md
 docs/guides/coordination.md
+docs/guides/multi-account-group.md
 docs/guides/extending.md
 docs/guides/troubleshooting.md
 docs/guides/contributing.md
 docs/guides/core-dependencies.md
-docs/guides/coordination-library.md
 docs/roadmap.md
 docs/core-consumption-audit.md
 docs/hunting-engine-plan.md

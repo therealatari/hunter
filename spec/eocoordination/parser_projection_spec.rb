@@ -91,9 +91,10 @@ RSpec.describe EO::Coordination::ParserProjection do
   end
   let(:staff) { OpenStruct.new(id: 42, noun: 'staff', name: 'an ossified vermilion staff') }
   let(:game_objects) { OpenStruct.new(right_hand: staff, left_hand: nil) }
+  let(:room_lock) { Mutex.new }
   let(:projection) do
     described_class.new(game: game, xml: xml, game_objects: game_objects,
-                        socket_hook: socket_hook, downstream_hook: downstream_hook)
+                        socket_hook: socket_hook, downstream_hook: downstream_hook, room_lock: room_lock)
   end
 
   after do
@@ -248,6 +249,31 @@ RSpec.describe EO::Coordination::ParserProjection do
     game.ingress = nil
     on_parser.call { downstream_hook.run('parsed') }
     expect(projection.read).to be_nil
+  end
+
+  it 'does not publish a completed input line while native room arrival is unfinished' do
+    projection.install!
+    receive_input(10.0)
+    complete_dispatch(10.0)
+    expect(projection.read).not_to be_nil
+
+    receive_input(11.0)
+    on_parser.call { room_lock.lock } # XMLParser NAV opens Claim::Lock.
+    xml.room_id = 325
+    complete_dispatch(11.0) # NAV can finish before room players arrive.
+    expect(projection.read).to be_nil
+
+    receive_input(12.0)
+    complete_dispatch(12.0) # Unrelated completed lines cannot reopen it.
+    expect(projection.read).to be_nil
+
+    receive_input(13.0)
+    on_parser.call { room_lock.unlock } # Native compass/Claim completion.
+    xml.room_count = 8
+    complete_dispatch(13.0)
+    expect(projection.read.dig(:fields, :room, :value)).to include(uid: 325, epoch: 8)
+  ensure
+    on_parser.call { room_lock.unlock if room_lock.owned? }
   end
 
   it 'invalidates permanently stale worker bindings and starts a new generation on new input' do

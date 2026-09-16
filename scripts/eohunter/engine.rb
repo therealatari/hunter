@@ -69,6 +69,7 @@ module ::EO
       coordination_hold
       coordination
       controller
+      managed_group
     ].freeze
 
     # Load (or reload) every part. +load+ rather than +require+ so an

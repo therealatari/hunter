@@ -12,6 +12,8 @@ RSpec.describe EO::Engine::Watch do
 
   before do
     tracker.reset!
+    # Other behavior specs build profile rules before this group's first
+    # example. This fixture starts with no profile, independent of seed order.
     described_class.clear!
     EO::Engine::Events.on { |e| seen << [e.type, e.data] }
     stub_const('DownstreamHook', Class.new { def self.add(*); end; def self.remove(*); end })
@@ -147,10 +149,10 @@ RSpec.describe EO::Engine::Watch do
   end
 
   it 'turns another player\'s attack into an ally attack by name, and nothing when unnamed' do
-    tracker.emit(:attack, foreign_caster: true, attacker: { name: 'Skooshii' }, resolutions: [{ result: 200 }])
+    tracker.emit(:attack, foreign_caster: true, attacker: { name: 'Testfollower' }, resolutions: [{ result: 200 }])
     tracker.emit(:attack, foreign_caster: true, attacker: nil)
     tracker.emit(:attack, foreign_caster: true, attacker: { id: -5 })
-    expect(seen).to eq([[:ally_attacked, { name: 'Skooshii' }]])
+    expect(seen).to eq([[:ally_attacked, { name: 'Testfollower' }]])
   end
 
   it 'keeps a hook only for rules of its own, such as the profile flee text' do

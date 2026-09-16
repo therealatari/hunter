@@ -546,6 +546,24 @@ module EO::Engine
         @phase = :hunting_prep
       end
 
+      # Managed startup runs the same local prep commands, but cannot cross
+      # the rally/departure boundary until every admitted owner commits.
+      def prepare_managed!
+        @reason = 'managed preparation'
+        @remaining = nil
+        @phase = :managed_preparation
+      end
+
+      def managed_prepared? = @phase == :managed_ready
+
+      # The leader has already performed its local preparation at refuge.
+      # Later ordinary rest cycles retain the normal group prep orders.
+      def depart_managed!
+        @reason = 'starting'
+        @remaining = nil
+        @phase = :rally_out
+      end
+
       # The engine's stop: end a trip in flight.
       # @return [void]
       def cancel! = EO::Engine::Travel.cancel(self)
@@ -596,6 +614,8 @@ module EO::Engine
         return nil if outbound? && abort_outbound_if_needed(world)
 
         case @phase
+        when :managed_preparation then step_prep(world, @policy.hunting_prep_command_list, [], :managed_ready, wait_for_scripts: true)
+        when :managed_ready then nil
         when :hunting
           # A buff loss never tears down an owned skin/loot hand transaction.
           return @loot.tick(world) if @buffs&.enabled? && @loot&.looting?
@@ -762,6 +782,15 @@ module EO::Engine
         fried_names = reasons.filter_map { |name, reason| name if reason.to_s =~ /fried/ }
         return nil if list.all? { |reason| reason.to_s =~ /fried/ } && !@group.fried_rest?(fried_names)
         return nil if list.any? { |r| r.to_s =~ /wounded/ } && EO::Engine::Survival::Predicates.group_member_stunned?(world)
+
+        # If the experience barrier is not met, a safety/resource reason is
+        # what made us return. Do not hide it behind a support leader's fried
+        # flag (which may deliberately be satisfied from the start).
+        unless @group.fried_rest?(fried_names)
+          urgent = reasons.reject { |_name, reason| reason.to_s =~ /fried/ }
+          return own if own && own.to_s !~ /fried/
+          return urgent.map { |name, reason| "#{name}: #{reason}" }.join(', ')
+        end
 
         own || reasons.map { |n, r| "#{n}: #{r}" }.join(', ')
       end

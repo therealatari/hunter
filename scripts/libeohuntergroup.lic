@@ -1,0 +1,27 @@
+=begin
+  libeohuntergroup: stable, opt-in EOHunter multi-account startup library.
+  author: elanthia-online
+  game: Gemstone
+  tags: library, hunting
+  required: Lich >= 5.21.0
+  version: 0.1.0
+=end
+
+require 'securerandom'
+require 'json'
+require 'yaml'
+
+Object.const_set(:EO, Module.new) unless Object.const_defined?(:EO, false)
+
+module ::EO
+  module HunterGroup
+    # Source/build dependency order for this inert, stable library.
+    PARTS = %w[settings rendezvous supervisor coordinator runtime].freeze
+  end
+end
+
+# BEGIN SOURCE PARTS
+EO::HunterGroup::PARTS.each do |part|
+  require File.join(SCRIPT_DIR, 'eohunter_group', "#{part}.rb")
+end
+# END SOURCE PARTS

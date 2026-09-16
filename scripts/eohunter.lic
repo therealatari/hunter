@@ -67,6 +67,16 @@
     - initial: loads the engine, installs the watch, reports the parts
 =end
 
+# This short-lived CLI shim must dispatch before the duplicate guard and the
+# reloadable engine. The persistent receiver starts the exact owned head child.
+if script.vars[2].to_s.casecmp?('group')
+  raise ArgumentError, 'usage: ;eohunter <profile> group' unless script.vars[3..].to_a.empty?
+
+  Script.loadlib('libeohuntergroup') unless defined?(::EO::HunterGroup::Supervisor)
+  ::EO::HunterGroup.dispatch_group(script.vars[1].to_s)
+  exit
+end
+
 # The engine consumes lich-5 #1578-#1587 (Stance, Stash, Mana.pulse, Bank,
 # the PSM readers, Fog, the spell refresh, Combat::Messages, bounded
 # fput): a Lich without them is the eohunter test package's job, not a
@@ -490,7 +500,8 @@ module EOHunter
     loot = E::Behaviors::Loot.new(policy: profile.loot_policy, targets_policy: targets_policy, rest_policy: rest_policy,
                                   counters: counters, follower: true, scripts: scripts)
     assist = E::Behaviors::Assist.new(member: member, policy: profile.engage_policy, targets_policy: targets_policy, wander_policy: wander_policy,
-                                      mstrike_policy: profile.mstrike_policy, maintain_state: maintain_state)
+                                      mstrike_policy: profile.mstrike_policy, maintain_state: maintain_state,
+                                      fried: -> { E::Rest::Predicates.fried?(world.me, rest_policy) })
     follow = E::Behaviors::Follow.new(member: member, travel: travel)
     orders = E::Behaviors::Orders.new(member: member, policy: rest_policy, counters: counters, assist: assist, follow: follow, loot: loot,
                                       sneaky: wander_policy.sneaky, scripts: scripts, travel: travel)
@@ -593,7 +604,7 @@ module EOHunter
   # @param args [Array<String>] a follower count, follower names, or nothing
   #   (the current group)
   # @return [E::Group::Leader] the activated group
-  def self.lead(profile, world, args)
+  def self.lead(profile, world, args, managed: nil, identity_reader: nil, native_reader: nil)
     # The Hub is served on the loopback address unless the profile's
     # group spans machines: 'head 2 lan' opts back in to all interfaces.
     lan = args.reject! { |a| a.to_s.casecmp('lan').zero? } ? true : false
@@ -601,8 +612,7 @@ module EOHunter
     if strict && (lan || args.empty? || args.any? { |arg| !arg.to_s.match?(/\A[A-Za-z]+\z/) })
       raise ArgumentError, 'strict group movement requires explicit follower names on this machine: head <name> <name>'
     end
-    identity_reader = group_identity_reader if strict
-    native_reader = nil
+    identity_reader ||= group_identity_reader if strict
     service_started = false
     transferred = false
     begin
@@ -632,6 +642,14 @@ module EOHunter
       rooms = { rally: profile['rallypoint_room_ids'], hunting: profile['hunting_room_id'],
                 waypoints: profile['return_waypoint_ids'], resting: profile['resting_room_id'] }
       hub.open_hunt(leader: Char.name, expected: expected, rooms: rooms)
+      if managed
+        native_reader ||= group_native_reader if strict
+        managed.report_hub(uri)
+        leader = E::Group::Leader.new(hub, name: Char.name, policy: profile.group_policy,
+                                      strict_movement: strict, identity_reader: identity_reader, native_reader: native_reader)
+        transferred = true
+        return leader
+      end
       msg('info', "leading #{expected.is_a?(Integer) ? "#{expected} followers" : expected.join(', ')}; rallying at #{uri}")
       deadline = Time.now + RALLY_TIMEOUT
       until hub.ready?
@@ -644,7 +662,7 @@ module EOHunter
       end
       hub.activate!
       msg('info', "group: #{hub.members.join(', ')}")
-      native_reader = group_native_reader if strict
+      native_reader ||= group_native_reader if strict
       leader = E::Group::Leader.new(hub, name: Char.name, policy: profile.group_policy,
                                     strict_movement: strict, identity_reader: identity_reader, native_reader: native_reader)
       transferred = true
@@ -667,8 +685,18 @@ module EOHunter
   # @param strict_movement [Boolean] require the strict same-host movement protocol
   # @return [E::Group::Member] our registration, once the hunt is active
   #   or the wait for it timed out
-  def self.follow(args, strict_movement: false)
+  def self.follow(args, strict_movement: false, managed: nil, identity_reader: nil, native_reader: nil)
+    identity_reader ||= group_identity_reader if strict_movement
     uri = args.first.to_s =~ %r{\Adruby://} ? args.first : nil
+    if managed
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + RALLY_TIMEOUT
+      until (uri = managed.hub_uri)
+        raise E::ManagedGroup::Failed, 'managed follower cancelled before registration' if managed.cancelled?
+        raise E::ManagedGroup::Failed, 'managed leader did not publish a hub' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 0.1
+      end
+    end
     unless uri
       hook = proc do |line|
         uri = Regexp.last_match(1) if uri.nil? && line =~ RALLY_LINE
@@ -690,12 +718,10 @@ module EOHunter
     if strict_movement && !uri.to_s.match?(%r{\Adruby://127\.0\.0\.1:[0-9]+\z})
       raise ArgumentError, 'strict group movement accepts only a local loopback leader'
     end
-    identity_reader = group_identity_reader if strict_movement
-    native_reader = nil
     service_started = false
     transferred = false
     begin
-      native_reader = group_native_reader if strict_movement
+      native_reader ||= group_native_reader if strict_movement
       DRb.start_service
       service_started = true
       hub = DRbObject.new_with_uri(uri)
@@ -715,6 +741,12 @@ module EOHunter
         exit
       end
       msg('info', "joined #{member.leader_name}'s hunt #{member.hunt_id}; waiting for the start")
+      if managed
+        raise E::ManagedGroup::Failed, 'registered with a different leader' unless member.leader_name.to_s.casecmp?(managed.leader)
+
+        transferred = true
+        return member
+      end
       deadline = Time.now + RALLY_TIMEOUT * 2
       sleep 0.5 until (hub.active? rescue false) || Time.now > deadline
       transferred = true
@@ -726,10 +758,86 @@ module EOHunter
       end
     end
   end
+
+  # Both managed roles use the ordinary builders. Only activation and terminal
+  # return belong to the adapter; no second combat/rest implementation exists.
+  def self.run_managed(profile, world, context)
+    owner = Script.current
+    engine = leader = member = native = children = nil
+    before_dying do
+      begin
+        engine&.stop!(:script_killed)
+        leader&.stop_pulse!
+        member&.stop_pulse!
+        leader&.finish!(engine&.stop_reason || :startup_failed)
+        children&.stop_all
+        DRb.stop_service unless context.recovery?
+      ensure
+        native.close if native.respond_to?(:close)
+        E::Watch.uninstall!
+        E::Events.reset!
+        E::Actions::Base.interrupt = nil
+      end
+    end
+    identity = group_identity_reader
+    native = group_native_reader
+    unless context.recovery?
+      raise E::ManagedGroup::Failed, 'membership refresh requires the approved refuge and connection' unless world.room.id == context.refuge_room && identity.call
+
+      # JOIN supplies the leader, not necessarily the complete existing party.
+      # Native Group.nouns is a cache-only reader; refresh once on the owner.
+      ::Lich::Gemstone::Group.check
+      raise E::ManagedGroup::Failed, 'native group refresh was not confirmed' unless ::Lich::Gemstone::Group.checked?
+    end
+    children = E::ManagedGroup::Children.new(owner: owner)
+    leader = lead(profile, world, context.members.dup, managed: context, identity_reader: identity, native_reader: native) if context.role == :head
+    member = follow([], strict_movement: profile['group_strict_movement'], managed: context, identity_reader: identity, native_reader: native) if context.role == :tail
+    behaviors = member ? build_follower(profile, world, member, scripts: children) : build(profile, world, leader: leader, scripts: children)
+    if !context.recovery? && behaviors[:area]&.too_big?
+      raise E::ManagedGroup::Failed, 'refusing to hunt with an unbounded area; add a boundary'
+    end
+    behaviors[:loadout_policy] = profile.loadout_policy
+    adapter = E::ManagedGroup::Adapter.new(context: context, behaviors: behaviors, world: world,
+                                           children: children, native_reader: native, identity_reader: identity, leader: leader, member: member)
+    list = behaviors.values_at(:survival, :cleanse, :flee, :muster, :rest, :loot, :loadout, :maintain, :engage, :wander).compact
+    engine = E::Engine.new(world: world, behaviors: [adapter] + list)
+    wire(engine, behaviors)
+    adapter.attach(engine)
+    wire_movement(engine, leader: leader) if leader&.strict_movement?
+    wire_movement(engine, orders: behaviors[:rest]) if member&.strict_movement?
+    if leader
+      engine.on_tick { |w| leader.publish(w, phase: adapter.phase == :hunting && !behaviors[:rest].resting? ? :hunting : :resting, target: behaviors[:engage].target) }
+      leader.keep_alive!
+    elsif member
+      encumbrance = E::Rest::Encumbrance.new(seconds: profile['encumbrance_grace_seconds'])
+      engine.on_tick do |w|
+        next if adapter.phase == :returning || adapter.phase == :safe
+
+        member.report(E::Group.report(w, name: Char.name, rest_policy: behaviors[:rest_policy], counters: behaviors[:counters],
+          sneaky: behaviors[:sneaky], looting: behaviors[:loot].looting?, rest_prep_done: behaviors[:rest].rest_prep_done,
+          forced: behaviors[:rest].forced_reason, encumbrance: encumbrance))
+      end
+      member.keep_alive!
+    end
+    E::Watch.install!
+    engine.run
+    adapter.finish!
+  rescue StandardError => error
+    context.report_unresolved("#{error.class}: #{error.message}")
+    raise
+  end
 end
 
 name = script.vars[1].to_s
 options = script.vars[2..].to_a.map(&:to_s)
+managed = nil
+if options.last == 'managed'
+  Script.loadlib('libeohuntergroup') unless defined?(::EO::HunterGroup::Supervisor)
+  managed = ::EO::HunterGroup.await_context(Script.current)
+  raise ArgumentError, 'managed launch does not match its admitted profile/role' unless name == managed.profile && options == [managed.role.to_s, 'managed']
+
+  options.pop
+end
 controlled, options = EO::Engine::Controller::Launch.extract!(options)
 trial, options = EO::Engine::Controller::TrialSequence.extract!(options)
 dry = options.any? { |o| o =~ /^dry$/i }
@@ -737,11 +845,12 @@ if name.empty?
   EOHunter.msg('error', 'usage: ;eohunter <profile> [dry] [bandits] [track <creature>] [head <count> [lan]|tail [uri]]  or  ;eohunter bounty [<creature>] [head <count>|tail]')
   exit
 end
-mode_at = options.index { |o| o =~ /^(head|lead|tail|follow)$/i }
+mode_at = options.index { |o| o =~ /^(head|lead|tail|follow|recover)$/i }
 mode = mode_at && options[mode_at].downcase
 mode_args = mode_at ? options[(mode_at + 1)..] : []
 mode = 'head' if mode == 'lead'
 mode = 'tail' if mode == 'follow'
+raise ArgumentError, 'recover requires an exact managed supervisor binding' if mode == 'recover' && !managed
 options = options[0...mode_at] if mode_at
 if trial && !controlled
   raise EO::Engine::Controller::Invalid, 'trial sequences require a supervised controller launch'
@@ -783,11 +892,15 @@ if bounty_mode
   $bigshot_bandits = EO::Engine::Tracking.bandit_task?(bounty_task) ? true : false
 else
   path = EOHunter.profile_path(name)
-  unless File.exist?(path)
+  unless managed&.profile_settings || File.exist?(path)
     EOHunter.msg('error', "no profile at #{path}")
     exit
   end
-  profile = EO::Engine::Profile.load(path, uid_ids: ->(uid) { world.uid_ids(uid) })
+  profile = if managed&.profile_settings
+              EO::Engine::Profile.new(managed.profile_settings, name: name, uid_ids: ->(uid) { world.uid_ids(uid) })
+            else
+              EO::Engine::Profile.load(path, uid_ids: ->(uid) { world.uid_ids(uid) })
+            end
 end
 # The bounty only decides bandit mode in bounty mode. bigshot reaches
 # set_bandit_hunting from inside `if options.any? { |var| var =~ /bounty/i }`
@@ -800,6 +913,18 @@ tracking = EO::Engine::Tracking.policy_from(options.reject { |o| o =~ /^dry$/i }
 controlled&.admit_profile!(profile)
 trial&.admit_profile!(profile)
 profile.validate_rest_mode!(mode, controlled: !controlled.nil?, bounty: bounty_mode)
+
+if managed
+  profile.validate_rest_mode!('head')
+  raise ArgumentError, 'managed profile refuge differs from the admitted refuge' unless profile['resting_room_id'] == managed.refuge_room
+  if managed.role == :head && profile['group_members'].map(&:downcase).sort != managed.members.map(&:downcase).sort
+    raise ArgumentError, 'managed profile roster changed after admission'
+  end
+  require 'digest'
+  managed.pin_profile(profile.source, Digest::SHA256.hexdigest(Marshal.dump(profile.settings))) unless managed.profile_settings
+  EOHunter.run_managed(profile, world, managed)
+  exit
+end
 
 if mode == 'tail'
   exit if dry

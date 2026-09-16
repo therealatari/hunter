@@ -215,7 +215,17 @@ module EO::Engine
       #
       # @param _world [World]
       # @return [void]
-      def preempted!(_world) = stop_script!
+      def preempted!(_world)
+        preserve = @preserve_next_preemption
+        @preserve_next_preemption = nil
+        stop_script! unless preserve && preserve.call
+      end
+
+      # A managed cooperative return drains this transaction using #tick.
+      # One handoff only: subsequent survival preemption still stops the child.
+      def preserve_next_preemption!(&predicate)
+        @preserve_next_preemption = predicate || -> { true }
+      end
 
       # The engine stopping: same thing, no world to hand over.
       #

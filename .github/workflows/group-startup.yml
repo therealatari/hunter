@@ -1,0 +1,41 @@
+name: multi-account group startup
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      - run: bundle exec rspec spec/eohunter_group spec/hunter_group_build_spec.rb spec/coordination_build_spec.rb
+      - run: bundle exec rake build:group
+      - run: ruby -c dist/eohunter.lic
+      - run: ruby -c dist/eohunter-ma-group.lic
+      - run: ruby -c dist/libeohuntergroup.lic
+      - run: ruby -c dist/libeocoordination.lic
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eohunter-multi-account-${{ matrix.os }}
+          path: |
+            dist/eohunter.lic
+            dist/eohunter.lic.map
+            dist/eohunter-ma-group.lic
+            dist/libeohuntergroup.lic
+            dist/libeohuntergroup.lic.map
+            dist/libeocoordination.lic
+            dist/libeocoordination.lic.map
+          if-no-files-found: error

@@ -73,14 +73,15 @@ module EO::Engine
       # MA Grouping
       'independent_travel' => [:bool, false], 'independent_return' => [:bool, false], 'group_deader' => [:bool, false],
       'ma_looter' => [:string, nil], 'never_loot' => [:split_xx, []], 'random_loot' => [:bool, false], 'quiet_followers' => [:bool, true],
-      'group_fried_trigger' => [:split, ['any']], 'group_strict_movement' => [:bool, false]
+      'group_fried_trigger' => [:split, ['any']], 'group_strict_movement' => [:bool, false],
+      'group_members' => [:list, []]
     }.freeze
 
     # The profile's name (the YAML's basename) and every RULES key with
     # its cleaned value.
     #
     # @return [String, nil, Hash{String => Object}]
-    attr_reader :name, :settings
+    attr_reader :name, :settings, :source
 
     # The profile YAML at +path+, named by its basename.
     #
@@ -98,6 +99,7 @@ module EO::Engine
     #   none, so a "u1234" room resolves to nil
     def initialize(raw, name: nil, uid_ids: nil)
       @name = name
+      @source = Marshal.load(Marshal.dump(raw))
       @uid_ids = uid_ids || ->(_uid) { [] }
       # RULES.freeze is shallow, so the [], {} and ['any'] defaults are one
       # object shared by every Profile in the process. A Policy that appends

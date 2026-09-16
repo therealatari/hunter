@@ -19,14 +19,17 @@ module EO
       # @param game_objects [Object] native GameObj class
       # @param socket_hook [Object] Lich::Common::SocketReadHook
       # @param downstream_hook [Object] DownstreamHook
+      # @param room_lock [Mutex, nil] native Claim arrival lock where available
       # @return [ParserProjection]
       def initialize(game: default_game, xml: default_xml, game_objects: default_game_objects,
-                     socket_hook: default_socket_hook, downstream_hook: default_downstream_hook)
+                     socket_hook: default_socket_hook, downstream_hook: default_downstream_hook,
+                     room_lock: default_room_lock)
         @game = game
         @xml = xml
         @game_objects = game_objects
         @socket_hook = socket_hook
         @downstream_hook = downstream_hook
+        @room_lock = room_lock
         @mutex = Mutex.new
         @hook_name = "#{HOOK_PREFIX}:#{object_id}"
         @installed = false
@@ -158,8 +161,14 @@ module EO
         @installed && live_binding_locked? && Thread.current.equal?(@parser) &&
           @connection_id && @sequence.positive? &&
           received_at.is_a?(Numeric) && received_at.finite? && received_at >= 0 &&
-          received_at == @latest_received_at && !buffered_input?
+          received_at == @latest_received_at && !buffered_input? && !room_arrival_pending?
       end
+
+      # XMLParser acquires Claim::Lock at NAV and releases it at compass after
+      # collecting arriving players. One parsed input line is not necessarily a
+      # completed room. Never wait on this mutex from the parser callback: that
+      # same thread must continue parsing to release it.
+      def room_arrival_pending? = @room_lock && @room_lock.locked?
 
       def buffered_input?
         instance = @game.game_instance
@@ -220,6 +229,7 @@ module EO
       def default_game_objects = ::GameObj
       def default_socket_hook = ::Lich::Common::SocketReadHook
       def default_downstream_hook = ::DownstreamHook
+      def default_room_lock = defined?(::Lich::Claim::Lock) ? ::Lich::Claim::Lock : nil
     end
   end
 end
